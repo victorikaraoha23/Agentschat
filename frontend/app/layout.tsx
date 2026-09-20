@@ -18,6 +18,7 @@ export const metadata: Metadata = {
   description: "Messenger-style platform where AI teams deliver finished work.",
 };
 
+/** Renders the application shell and initializes site-wide analytics. */
 export default function RootLayout({
   children,
 }: Readonly<{
