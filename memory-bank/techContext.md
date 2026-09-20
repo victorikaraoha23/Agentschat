@@ -1,22 +1,50 @@
 # Tech Context
 
-## Current repository state (verified at `0890c0c`)
+## Current repository state (verified at `df1fa97`)
 
 ```
 agentschat/
 ├── .editorconfig          # UTF-8, LF, indent 2 (4 for Python), no trailing whitespace
 ├── .gitignore             # Python, Node, env, testing, IDE, OS, logs
-├── README.md              # one-liner + structure
+├── README.md              # one-liner + structure + development pointer
 ├── CONVENTIONS.md         # backend + frontend rules
 ├── CLAUDE.md              # byte-identical copy of CONVENTIONS.md
-├── Agents.md              # full project context — UNTRACKED as of 0890c0c
+├── Agents.md              # full project context (tracked since e1f126a)
+├── .clinerules            # byte-identical copy of CONVENTIONS.md (IDE rules file)
 ├── memory-bank/           # this persistent-context set
-├── backend/               # placeholder only (.gitkeep) — no code yet
+├── backend/               # scaffolded — see below
 └── frontend/              # placeholder only (.gitkeep) — no code yet
 ```
 
-There is **no application code, no dependency manifest, and no test suite**. Nothing here is
-executable yet. The layout in `Agents.md` §3 is the target, not the current state.
+`backend/` in detail:
+
+```
+backend/
+├── pyproject.toml         # deps, [dependency-groups] dev, ruff / mypy / pytest config
+├── uv.lock                # committed lockfile
+├── .python-version        # 3.11
+├── README.md              # environment + commands
+├── .venv/                 # CPython 3.11.16 venv via uv — GITIGNORED, never commit
+├── src/
+│   ├── main.py            # FastAPI app + GET /health
+│   ├── config.py          # Settings (pydantic-settings) — the only env-var reader
+│   ├── db.py              # engine, SessionLocal, get_db
+│   ├── api/               # (each of these is still just an empty __init__.py)
+│   ├── models/
+│   ├── repositories/
+│   ├── services/
+│   ├── workflows/
+│   ├── workflows/stages/
+│   ├── tasks/
+│   └── utils/
+└── tests/
+    ├── __init__.py
+    └── test_health.py
+```
+
+The backend is runnable: the test suite, lint, type check, and the API server all pass. Everything
+under `src/` except `main.py`, `config.py`, and `db.py` is still an empty package, and the frontend
+is untouched. The layout in `Agents.md` §3 remains the target for both.
 
 ## Target stack
 
@@ -57,13 +85,42 @@ Deployment: Railway.
 
 The contracts to satisfy once the toolchains exist (`Agents.md` §13).
 
-Backend, from `backend/`:
+### Backend environment (venv)
+
+Every backend command runs inside a project-local virtual environment at `backend/.venv`:
+
+| Fact | Value |
+|---|---|
+| Interpreter | CPython 3.11.16 (uv-managed; `include-system-site-packages = false`) |
+| Prompt | `agentschat-backend` |
+| Tracked? | **No** — `.gitignore:9 .venv/` |
+| Lockfile | `uv.lock`, committed |
 
 ```
-pytest
-mypy --strict src
-ruff check .
-alembic upgrade head          # then: downgrade -1, upgrade head
+uv sync                # create/refresh .venv (the `dev` group is a uv default group)
+uv sync --no-dev       # runtime dependencies only
+uv sync --locked       # CI: require uv.lock to be current, do not rewrite it
+```
+
+`uv run` uses `backend/.venv` automatically, so activating is optional. To activate explicitly use
+`.\.venv\Scripts\Activate.ps1` (Windows) or `source .venv/bin/activate` (POSIX). To confirm which
+interpreter is in use: `uv run python -c "import sys; print(sys.prefix)"`.
+
+The project is **not packaged** — `pyproject.toml` declares no `[build-system]`, so nothing is
+installed into `.venv` and `src.*` resolves from the working directory instead. Two consequences:
+
+- Always invoke `uv run` from `backend/`.
+- `from src import db` works because the project root lands on `sys.path` (pytest's prepend import
+  mode via `tests/__init__.py`; uvicorn's `--app-dir` default of the cwd).
+
+Backend commands, from `backend/` — **all verified working** at `df1fa97`:
+
+```
+uv run pytest                 # coverage comes from addopts = "--cov=src"
+uv run ruff check .
+uv run mypy src               # 12 modules, strict
+uv run uvicorn src.main:app   # GET /health -> 200
+uv run alembic upgrade head   # not runnable yet: no alembic.ini / alembic/ env exists
 ```
 
 Frontend, from `frontend/`:
@@ -74,7 +131,7 @@ npm run typecheck             # tsc --noEmit
 npm run lint
 ```
 
-> None of these run today: there is no `pyproject.toml` and no `package.json`.
+> The frontend commands cannot run yet: there is no `package.json`.
 
 ## Testing contract (`Agents.md` §4.7, §11)
 
