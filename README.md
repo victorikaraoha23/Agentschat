@@ -7,6 +7,7 @@ A messenger-style web app where every conversation is with an AI agent: create a
 - `backend/` — FastAPI service, worker, 7-stage pipeline, migrations, tests
 - `frontend/` — Next.js (App Router) UI, components, hooks
 - `CONVENTIONS.md` — backend and frontend rules for contributors and coding agents
+- `memory-bank/` — persistent context: brief, product, architecture, tech, active focus, progress
 - `CLAUDE.md` — identical copy of `CONVENTIONS.md`
 
 `CONVENTIONS.md` and `CLAUDE.md` are kept identical on purpose, so every tool sees the same rules.
