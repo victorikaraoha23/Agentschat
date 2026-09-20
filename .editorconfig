@@ -1,0 +1,24 @@
+# EditorConfig — https://editorconfig.org
+# Applies to every editor that understands EditorConfig.
+root = true
+
+# Everything: UTF-8, LF line endings, 2-space indentation, no trailing
+# whitespace, and exactly one trailing newline.
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Python is 4-space indented (PEP 8).
+[*.py]
+indent_size = 4
+
+[*.pyi]
+indent_size = 4
+
+# Markdown: two trailing spaces are a hard line break, so never trim them.
+[*.md]
+trim_trailing_whitespace = false
