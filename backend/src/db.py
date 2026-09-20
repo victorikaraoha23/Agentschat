@@ -1,10 +1,14 @@
 """Database engine, session factory, and the session dependency.
 
-Import as ``from src import db`` and call ``db.SessionLocal()`` at use time, so tests can
-retarget ``src.db.SessionLocal``.
+Import as ``from src import db`` and resolve the session factory at use time, so tests can retarget
+``src.db.get_sessionmaker``.
+
+Everything here is built **lazily**: ``database_url`` defaults to an empty string (unset) and
+SQLAlchemy cannot parse an empty URL, so importing this module must not create an engine.
 """
 
 from collections.abc import AsyncGenerator
+from functools import lru_cache
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -15,17 +19,22 @@ from sqlalchemy.ext.asyncio import (
 
 from src.config import settings
 
-engine: AsyncEngine = create_async_engine(settings.database_url, pool_pre_ping=True)
 
-SessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
-    bind=engine,
-    expire_on_commit=False,
-)
+@lru_cache(maxsize=1)
+def get_engine() -> AsyncEngine:
+    """Return the process-wide async engine, building it on first use."""
+    return create_async_engine(settings.database_url, pool_pre_ping=True)
+
+
+@lru_cache(maxsize=1)
+def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
+    """Return the process-wide session factory, building it on first use."""
+    return async_sessionmaker(bind=get_engine(), expire_on_commit=False)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Yield a session, rolling back on error and always closing it."""
-    session = SessionLocal()
+    session = get_sessionmaker()()
     try:
         yield session
     except Exception:
@@ -33,3 +42,4 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         raise
     finally:
         await session.close()
+
