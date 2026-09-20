@@ -19,6 +19,7 @@ export const metadata: Metadata = {
   description: "Messenger-style platform where AI teams deliver finished work.",
 };
 
+/** Renders the app-wide layout with analytics and performance monitoring. */
 export default function RootLayout({
   children,
 }: Readonly<{
