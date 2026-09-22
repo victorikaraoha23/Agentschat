@@ -1,0 +1,12 @@
+# Limit Codacy to the AgentsChat web application. The repository also contains
+# the vendored Hermes runtime and generated/non-UTF-8 artifacts, which are not
+# part of this pull request and can cause Codacy analyzers to fail.
+include_patterns:
+  - "apps/web/**"
+
+exclude_patterns:
+  - "apps/web/node_modules/**"
+  - "apps/web/.next/**"
+  - "apps/web/out/**"
+  - "apps/web/build/**"
+  - "apps/web/coverage/**"
