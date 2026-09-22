@@ -9,12 +9,12 @@ execution dependency and which is not itself user-visible.
 
 ## Current status
 
-**Foundational development stage. No application functionality exists yet.**
+**Foundational development stage: the web application skeleton exists; no product functionality does yet.**
 
-This repository currently contains the engineering constitution, the agent-runtime source that AgentsChat
-will depend on, and repository-level documentation. There is **no** web application, API, database schema,
-authentication, chat interface, agent integration, or deployment configuration. Nothing described below is
-a claim that a feature exists.
+The repository contains the engineering constitution, the agent-runtime source that AgentsChat depends on,
+and the foundation of the web application (`apps/web`, a single static page). There is **no** API server,
+database schema, authentication, chat interface, agent execution, or deployment configuration yet. Nothing
+described below as planned is implemented.
 
 ## Planned architecture
 
@@ -57,10 +57,11 @@ Engineering standards, security requirements, testing expectations, and the Defi
 
 ## Repository layout
 
-AgentsChat application code (not created yet):
+AgentsChat application code:
 
-- `apps/web/` — the Next.js web application.
-- `apps/api/` — the FastAPI backend/API.
+- `apps/web/` — the Next.js web application. Its foundation exists (App Router, TypeScript strict mode,
+  one static page); see [`apps/web/README.md`](./apps/web/README.md) for commands.
+- `apps/api/` — the FastAPI backend/API. **Not created yet.**
 
 Each application is added by the task that builds it, together with its own tooling (Node/TypeScript for
 the web application, Python for the API). **No monorepo framework is used**, and the Python backend is not
@@ -78,9 +79,11 @@ Existing content:
 
 Notes for the tasks that create `apps/*`:
 
-- The root `package.json` declares Hermes npm workspaces with an **`apps/*` glob**, so a future
-  `apps/web` Node package would be picked up by that glob. The task that creates it must decide whether it
-  joins that workspace or stays independent; the glob was deliberately left untouched here.
+- The root `package.json` declares Hermes npm workspaces with an **`apps/*` glob**, which also matches
+  `apps/web`. `apps/web` is an **independent** npm package: install with `npm install --workspaces=false`
+  from inside it, so the Hermes monorepo's JavaScript dependencies are never pulled into this app. The
+  Hermes-side glob was deliberately left untouched — narrowing it is an explicitly scoped Hermes change,
+  not a side effect of an AgentsChat task.
 - The root `.gitignore` is upstream Hermes's and contains broad patterns (`data/`, `examples/`, `logs/`,
   `images/`) that also match paths inside future application directories. Verify that new application files
   are not silently ignored.
@@ -88,8 +91,9 @@ Notes for the tasks that create `apps/*`:
 
 ## Roadmap
 
-**Current stage — Stage 0: repository foundation.** Governance (`AGENTS.md`), repository documentation,
-and repository hygiene. No application functionality exists.
+**Current stage — Stage 1: application foundation.** Stage 0 (governance, documentation, repository
+hygiene) is complete, and the Next.js web application exists as a buildable, renderable skeleton. No
+product functionality exists yet.
 
 High-level upcoming stages:
 
@@ -107,8 +111,9 @@ not restate the build plan.
 
 ## Environment configuration
 
-No environment variables are required at this stage, so **no AgentsChat `.env.example` exists yet**. It
-will be added by the first task that actually needs configuration (see `AGENTS.md` §16).
+No environment variables are required at this stage, so **no AgentsChat `.env.example` exists yet** — the
+web application foundation needs no configuration. One will be added by the first task that actually needs
+configuration (see `AGENTS.md` §16).
 
 The root `.env.example` is **upstream Hermes runtime** configuration and is unrelated to AgentsChat: it
 contains non-secret runtime defaults (timeouts, debug flags) plus commented-out placeholder credentials,

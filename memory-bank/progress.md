@@ -11,7 +11,7 @@
 - Verified `memory-bank/` directory listing via `Get-ChildItem` (creation observed).
 
 ## In progress
-- Awaiting user's next task. Task 1.1 is **not** started.
+- Awaiting user's next task. Task 1.2 is **not** started.
 
 ## Done (2026-09-22)
 - **Task 0.1 — engineering constitution** (commit `5026704a4e`): root `AGENTS.md` replaced with the
@@ -34,6 +34,17 @@
   `.gitignore` and these bank notes; `pyproject.toml`, `package.json` and `.env.example` untouched; no
   credentials in any changed file (secret-pattern scan clean); README read end to end and makes no claim
   that a feature exists.
+- **Task 1.1 — Next.js foundation (`apps/web`)**: scaffolded with `create-next-app` (Next `16.3.5`, React
+  `19.2.8`, App Router, TypeScript strict, ESLint, no Tailwind, no `src/`, alias `@/*`). Customized: minimal
+  landing page (`app/page.tsx`) naming AgentsChat and stating that only the skeleton exists, layout metadata
+  + `app/globals.css` base styles (light/dark), package name `agentschat-web`, `typecheck` script
+  (`next typegen && tsc --noEmit`), `public/` kept via `.gitkeep`, `!.env.example` added to the app
+  `.gitignore`, boilerplate README replaced with app-local commands.
+- Verified for Task 1.1: `npm install --workspaces=false` (347 packages, 0 vulnerabilities; `node_modules`
+  and `package-lock.json` stay inside `apps/web`), `npm run lint` exit 0, `npm run typecheck` exit 0,
+  `npm run build` exit 0 (static `/` and `/_not-found` prerendered), dev server returned HTTP 200 with
+  `<title>AgentsChat</title>` and `<h1>AgentsChat</h1>`, then was stopped. No API, auth, chat, Supabase or
+  Hermes integration exists.
 
 ## Backlog / reminders
 - Keep bank in sync when architecture or workflows change (point to `AGENTS.md`/code, don't duplicate).
@@ -54,3 +65,14 @@
 - 2026-09-22: No root `.env.example` was added for AgentsChat — no configuration is required yet, and adding
   placeholder config for features that do not exist is prohibited by `AGENTS.md` §16. Formatting/linting and
   type-check tooling for the applications is deferred to the tasks that create them.
+- 2026-09-22: `apps/web` is an **independent** npm package (`agentschat-web`), installed with
+  `npm install --workspaces=false`, even though the Hermes root `package.json` workspace glob (`apps/*`)
+  matches it. The Hermes-side glob was left untouched: narrowing it is an explicitly scoped Hermes change
+  (root `AGENTS.md` Appendix A), not a side effect of an AgentsChat task.
+- 2026-09-22: Kept the framework-generated `apps/web/AGENTS.md` and `CLAUDE.md` because `next dev` rewrites
+  the agent-rules block (deleting it only re-creates an uncommitted change). The root `AGENTS.md` remains
+  the governing instruction set; the app file only carries Next.js framework guidance.
+- 2026-09-22: Kept the Next 16 scaffold defaults, including the React Compiler
+  (`next.config.ts` → `reactCompiler: true` plus `babel-plugin-react-compiler`), rather than hand-tuning a
+  framework default in a foundation task. `typecheck` runs `next typegen` first because Next 16 route types
+  (`LayoutProps<"/">`) are generated, so `tsc` alone fails on a clean checkout.
