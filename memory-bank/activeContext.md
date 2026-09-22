@@ -1,7 +1,7 @@
 # Active Context
 
 - **Date:** 2026-09-22 (Task 0.2 session). Checkout branch `update`.
-- **Current task:** Task 1.1 (Next.js foundation in `apps/web`) — complete. Task 1.2 **not** started.
+- **Current task:** Task 1.2 (web structure and conventions) — complete. Task 1.3 **not** started.
 - **What was done:**
   - **Task 0.1 (2026-09-22):** rewrote root `AGENTS.md` as the AgentsChat engineering constitution
     (mission, separation of concerns, dependency direction, simplicity, atomic dev, type safety, API,
@@ -21,12 +21,16 @@
     TypeScript strict, ESLint, no Tailwind) with a single static page naming AgentsChat. Independent npm
     package `agentschat-web` installed via `npm install --workspaces=false`. No API, auth, chat, Supabase or
     Hermes integration exists.
+  - **Task 1.2 (2026-09-22):** reviewed the web structure and kept it as-is (already minimal and correct);
+    documented conventions in `apps/web/README.md` (routes/layouts, server-first components, styling,
+    future `components/` and `lib/` locations, `@/*` alias, strict TS, file naming). No new directories,
+    configuration, or dependencies.
 - **Open questions / pending user input:**
   - Should the root `package.json` npm workspace glob (`apps/*`) be scoped before `apps/web` is created?
   - Should `pyproject.toml`'s `readme = "README.md"` be repointed to `docs/hermes-runtime.md` (moved
     Hermes README), and should `apps/desktop/README.md`'s `../../README.md` link follow it?
 - **Next steps:**
-  - Start Task 1.2 only on explicit instruction; read the root `AGENTS.md` and `apps/web/README.md` first.
+  - Start Task 1.3 only on explicit instruction; read the root `AGENTS.md` and `apps/web/README.md` first.
   - On code changes: `scripts/run_tests.sh` for Hermes source; keep prompt-caching and profile-scope
     invariants.
 - **Key files for orientation:** `AGENTS.md` → `README.md` → `docs/hermes-runtime.md` → `memory-bank/*`;

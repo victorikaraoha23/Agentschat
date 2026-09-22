@@ -11,7 +11,7 @@
 - Verified `memory-bank/` directory listing via `Get-ChildItem` (creation observed).
 
 ## In progress
-- Awaiting user's next task. Task 1.2 is **not** started.
+- Awaiting user's next task. Task 1.3 is **not** started.
 
 ## Done (2026-09-22)
 - **Task 0.1 — engineering constitution** (commit `5026704a4e`): root `AGENTS.md` replaced with the
@@ -45,6 +45,17 @@
   `npm run build` exit 0 (static `/` and `/_not-found` prerendered), dev server returned HTTP 200 with
   `<title>AgentsChat</title>` and `<h1>AgentsChat</h1>`, then was stopped. No API, auth, chat, Supabase or
   Hermes integration exists.
+- **Task 1.2 — web structure and conventions**: reviewed the Task 1.1 structure and **kept it unchanged** —
+  it already provides App Router routes (`app/`), a root layout plus one page, and shared styling
+  (`app/globals.css`). No `components/`, `lib/`, `hooks/`, `services/` or `features/` directory was created,
+  because nothing belongs in them yet. The deliverable was the convention set, documented in
+  `apps/web/README.md`: route/layout organization, server-components-first with `"use client"` only where
+  interactivity is needed, styling (global stylesheet plus colocated CSS Modules), where reusable components
+  (`apps/web/components/`) and shared utilities (`apps/web/lib/`) go once they exist, the `@/*` import alias,
+  TypeScript strict rules, file naming, and formatting (no formatter configured, deferred).
+- Verified for Task 1.2: `npm run typecheck` exit 0, `npm run lint` exit 0, `npm run build` exit 0 (static
+  `/` and `/_not-found` prerendered), dev server returned HTTP 200 with `<h1>AgentsChat</h1>`, then stopped.
+  The diff contained `apps/web/README.md` and these bank notes only — no code, config, or dependency change.
 
 ## Backlog / reminders
 - Keep bank in sync when architecture or workflows change (point to `AGENTS.md`/code, don't duplicate).
@@ -76,3 +87,8 @@
   (`next.config.ts` → `reactCompiler: true` plus `babel-plugin-react-compiler`), rather than hand-tuning a
   framework default in a foundation task. `typecheck` runs `next typegen` first because Next 16 route types
   (`LayoutProps<"/">`) are generated, so `tsc` alone fails on a clean checkout.
+- 2026-09-22: Task 1.2 established web structure and conventions **by documentation only**: no directory,
+  config, or dependency was added. `apps/web/components/` and `apps/web/lib/` are named as the future homes
+  for reusable UI and shared utilities but are deliberately not created (root `AGENTS.md` §5/§18: no
+  speculative structure, no empty packages). `tsconfig.json`, `next.config.ts` and `eslint.config.mjs` were
+  left exactly as Task 1.1 set them, including the Next 16 defaults.
