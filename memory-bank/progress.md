@@ -57,6 +57,22 @@
   `/` and `/_not-found` prerendered), dev server returned HTTP 200 with `<h1>AgentsChat</h1>`, then stopped.
   The diff contained `apps/web/README.md` and these bank notes only — no code, config, or dependency change.
 
+- **Task 1.4 — API configuration (`apps/api/app/config.py`)**: centralized settings via `pydantic-settings`
+  (new direct dependency `pydantic-settings>=2,<3`, consistent with the existing bounded-pin style) with
+  an `AGENTSCHAT_API_` env prefix and exactly two settings — `app_name` (default `AgentsChat API`) and
+  `environment` (default `local`) — behind an `lru_cache` `get_settings()`. Wired the sole concrete
+  consumer: `FastAPI(title=settings.app_name)`. `/health` response unchanged. Five behavioral tests in
+  `tests/test_config.py` (defaults, overrides, unprefixed-variable isolation, two invalid-input cases).
+  No `.env.example`: the API starts with defaults, loads no `.env`, and has no secrets to document; the
+  two variables are documented in `apps/api/README.md` instead.
+- Verified for Task 1.4: `uv sync` exit 0 (installed pydantic-settings 2.15.0 with python-dotenv 1.2.3
+  transitively; root `uv.lock` untouched); `uv run pytest -q` → **6 passed**; live server on defaults →
+  `GET /health` **200** `{"status":"healthy"}` and OpenAPI title `AgentsChat API`; live server with
+  `AGENTSCHAT_API_APP_NAME` set → title `AgentsChat Override Check` while `/health` stayed byte-identical;
+  `Settings(environment="")` raises `ValidationError` naming the field; `apps/api/.env` does not exist;
+  both servers stopped and env vars cleared (0 listeners); diff limited to the five API files, the
+  updated `apps/api/uv.lock`, and the two memory-bank records.
+
 ## Backlog / reminders
 - Keep bank in sync when architecture or workflows change (point to `AGENTS.md`/code, don't duplicate).
 - Suggested update ritual: after each task, append decisions + verification under a dated heading here and refresh `activeContext.md`.
@@ -130,3 +146,8 @@
   setting), so it is documented in `apps/web/README.md` instead. No `engines` field was added: Next 16
   requires Node >=20.9.0 and Vercel's default satisfies it, so a pin would guard only against a dashboard
   misconfiguration.
+- 2026-09-22: configuration uses `pydantic-settings` in a single module with an `AGENTSCHAT_API_` prefix
+  (collision-safe against the Hermes process environment) and `lru_cache` — deliberately no `env_file`, so
+  no `.env` is ever read and defaults alone start the app. `python-dotenv` arrives transitively but is
+  inert. Absent until a concrete need: CORS, database, auth, provider keys, logging, and any `.env.example`
+  template (root `AGENTS.md` §5, §16, §21).
