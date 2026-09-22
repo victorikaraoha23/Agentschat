@@ -296,3 +296,40 @@ native/fts5_cjk/*.so
 
 # Disposable profile created by scripts/probe_active_session_exclusivity.py
 .probe-home/
+
+# ---------------------------------------------------------------------------
+# AgentsChat application artifacts (Task 0.2)
+# Only patterns the planned AgentsChat applications need; the upstream Hermes
+# patterns above are left as they are. Packaging-artifact patterns (dist/,
+# build/) are deferred until the API's packaging approach exists.
+# ---------------------------------------------------------------------------
+# Next.js build output and generated type files
+.next/
+out/
+next-env.d.ts
+
+# Node package-manager logs
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Python tooling artifacts
+*.egg-info/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage/
+htmlcov/
+
+# Editors and operating systems
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
+
+# Environment files that hold real values.
+# `.env.example` must stay committable: never add a blanket `.env*` rule without
+# keeping this negation (see AGENTS.md §16).
+.env.*.local
+!.env.example
