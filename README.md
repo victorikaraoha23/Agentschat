@@ -9,12 +9,12 @@ execution dependency and which is not itself user-visible.
 
 ## Current status
 
-**Foundational development stage: the web application skeleton exists; no product functionality does yet.**
+**Foundational development stage: the web and API application skeletons exist; no product functionality does yet.**
 
 The repository contains the engineering constitution, the agent-runtime source that AgentsChat depends on,
-and the foundation of the web application (`apps/web`, a single static page). There is **no** API server,
-database schema, authentication, chat interface, agent execution, or deployment configuration yet. Nothing
-described below as planned is implemented.
+and the foundations of both applications (`apps/web`, a single static page; `apps/api`, one health-check
+endpoint). There is **no** database schema, authentication, chat interface, agent execution, or production
+deployment yet. Nothing described below as planned is implemented.
 
 ## Planned architecture
 
@@ -61,7 +61,8 @@ AgentsChat application code:
 
 - `apps/web/` — the Next.js web application. Its foundation exists (App Router, TypeScript strict mode,
   one static page); see [`apps/web/README.md`](./apps/web/README.md) for commands.
-- `apps/api/` — the FastAPI backend/API. **Not created yet.**
+- `apps/api/` — the FastAPI backend/API. Its foundation exists (`uv`-managed project, one `GET /health`
+  endpoint); see [`apps/api/README.md`](./apps/api/README.md) for commands.
 
 Each application is added by the task that builds it, together with its own tooling (Node/TypeScript for
 the web application, Python for the API). **No monorepo framework is used**, and the Python backend is not
@@ -77,7 +78,7 @@ Existing content:
 - `docs/` — AgentsChat project documentation.
 - `memory-bank/` — short orientation notes maintained across AI-assisted development sessions.
 
-Notes for the tasks that create `apps/*`:
+Notes for the `apps/*` applications:
 
 - The root `package.json` declares Hermes npm workspaces with an **`apps/*` glob**, which also matches
   `apps/web`. `apps/web` is an **independent** npm package: install with `npm install --workspaces=false`
@@ -87,18 +88,19 @@ Notes for the tasks that create `apps/*`:
 - The root `.gitignore` is upstream Hermes's and contains broad patterns (`data/`, `examples/`, `logs/`,
   `images/`) that also match paths inside future application directories. Verify that new application files
   are not silently ignored.
+- `apps/api` is an independent **uv** project (its own `pyproject.toml`, `.venv`, and `uv.lock`): run
+  `uv sync` / `uv run` from inside it, never from the repository root, whose `uv.lock` belongs to Hermes.
 - The Hermes runtime requires Python `>=3.11,<3.14` (`pyproject.toml`).
 
 ## Roadmap
 
 **Current stage — Stage 1: application foundation.** Stage 0 (governance, documentation, repository
-hygiene) is complete, and the Next.js web application exists as a buildable, renderable skeleton. No
-product functionality exists yet.
+hygiene) is complete, and both application skeletons exist: the Next.js web application is buildable and
+renderable, and the FastAPI API starts and serves `GET /health`. No product functionality exists yet.
 
 High-level upcoming stages:
 
-1. Application skeletons: the Next.js web application and the FastAPI backend, with the API boundary
-   between them defined.
+1. The API boundary between the web application and the FastAPI backend, defined and wired end to end.
 2. Authentication and persistent user data on Supabase, with ownership enforced in the API and the
    database.
 3. Agent execution wired through the Hermes adapter boundary, with explicit run states, limits, and
@@ -111,9 +113,9 @@ not restate the build plan.
 
 ## Environment configuration
 
-No environment variables are required at this stage, so **no AgentsChat `.env.example` exists yet** — the
-web application foundation needs no configuration. One will be added by the first task that actually needs
-configuration (see `AGENTS.md` §16).
+No environment variables are required at this stage, so **no AgentsChat `.env.example` exists yet** —
+neither application skeleton needs environment-variable configuration. One will be added by the first task
+that actually needs configuration (see `AGENTS.md` §16).
 
 The root `.env.example` is **upstream Hermes runtime** configuration and is unrelated to AgentsChat: it
 contains non-secret runtime defaults (timeouts, debug flags) plus commented-out placeholder credentials,

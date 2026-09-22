@@ -11,7 +11,7 @@
 - Verified `memory-bank/` directory listing via `Get-ChildItem` (creation observed).
 
 ## In progress
-- Awaiting user's next task. Task 1.3 is **not** started.
+- Awaiting user's next task. Task 1.4 is **not** started.
 
 ## Done (2026-09-22)
 - **Task 0.1 — engineering constitution** (commit `5026704a4e`): root `AGENTS.md` replaced with the
@@ -63,6 +63,32 @@
 - Hermes-source tests run through `scripts/run_tests.sh` (never a bare `pytest`) and have not been needed, because no Hermes source has been modified. Web-app changes are validated inside `apps/web` with `npm run lint`, `npm run typecheck`, `npm run build`, and a dev-server render check.
 - Pre-existing repository CI items, verified as **not** caused by the AgentsChat web skeleton and out of scope for these tasks (each needs repo-settings or maintainer action in the Hermes-derived CI): `codeql.yml` ("CodeQL Advanced", a stock template added by `16e5a2161b`, whose matrix includes `ruby` although the checkout has no Ruby sources) fails to complete; `review-labels.yml` requires the `ci-reviewed` label whenever a CI-sensitive file changes, which flagged the scaffold-generated `apps/web/eslint.config.mjs` (added, never edited); Socket reports obfuscation heuristics on `eslint-plugin-react` and `damerau-levenshtein`, both transitive devDependencies of `eslint-config-next`.
 
+- **Task 1.3 — FastAPI foundation (`apps/api`)**: created an independent `uv` project (`pyproject.toml`,
+  `uv.lock`, `.venv`) with `app/main.py` exposing a typed `GET /health` (`HealthResponse` response model;
+  exact body `{"status": "healthy"}`; no secrets, environment details, or infrastructure info) and
+  `tests/test_health.py` using FastAPI's `TestClient`. App-local README documents install, run, and test
+  commands only. Isolation verified: the Hermes setuptools package-find `include` list excludes `apps/`,
+  the Hermes root pytest `testpaths = ["tests"]` does not collect `apps/api`, and the root `uv.lock` is
+  untouched. No auth, database, CORS, global handlers, logging, or Hermes integration. Root `README.md`
+  status/layout/roadmap/environment sections updated to match reality.
+- Verified for Task 1.3: `uv sync` exit 0 (resolved fastapi 0.141.1, uvicorn 0.53.0, pydantic 2.13.5,
+  pytest 9.1.1, httpx 0.28.1); import check exit 0 (`/health` route present); `uv run pytest -q` →
+  **1 passed**; live `uvicorn` on port 8000 → `GET /health` returned **200** with exactly
+  `{"status":"healthy"}` and `content-type: application/json`, port released after stop;
+  `npm run typecheck` in `apps/web` exit 0 with zero `git status` changes under `apps/web`; new and edited
+  files are LF per `.gitattributes`.
+
+- **Ad-hoc — Vercel readiness for `apps/web`**: proved with a local dry run that plain `npm install` from
+  `apps/web` climbs into the Hermes workspace root (`npm prefix` → repository root; the Hermes root
+  `postinstall` executed), which would misroute a default Vercel install. Added `apps/web/vercel.json`
+  pinning `installCommand` to `npm install --workspaces=false` (the command used since Task 1.1),
+  documented the dashboard-side Root Directory requirement in `apps/web/README.md`, and corrected the root
+  `README.md` claim about deployment configuration. No CI, Docker, or build-output changes.
+- Verified for the Vercel readiness change: the pinned install command re-ran from `apps/web` with the
+  root `package-lock.json` hash unchanged and root `node_modules` still absent; `npm run lint`,
+  `npm run typecheck`, `npm run build` → exit 0; `vercel.json` parses and is not git-ignored while
+  `.vercel/` stays ignored; diff limited to five intended files.
+
 ## Decision log
 - 2026-09-21: Used standard Cline six-file bank (projectbrief/productContext/systemPatterns/techContext/activeContext/progress) since repo-wide search timed out and no existing bank was visible at root listing. Content grounded in `AGENTS.md` + area guides + `README` + `pyproject`, not invented.
 - 2026-09-22: AgentsChat application code will live in `apps/web` (Next.js/TypeScript) and `apps/api`
@@ -93,3 +119,14 @@
   for reusable UI and shared utilities but are deliberately not created (root `AGENTS.md` §5/§18: no
   speculative structure, no empty packages). `tsconfig.json`, `next.config.ts` and `eslint.config.mjs` were
   left exactly as Task 1.1 set them, including the Next 16 defaults.
+- 2026-09-22: `apps/api` uses **uv** — the dependency manager already established by the root `uv.lock` —
+  as an independent project with its own `pyproject.toml`/`uv.lock`/`.venv`, mirroring the npm decision for
+  `apps/web`. No `[build-system]`/package install: pytest uses `pythonpath = ["."]` and uvicorn resolves
+  `app.main` from the working directory, so there is no packaging configuration that can drift. Dependency
+  floors follow the repository's known-current pins (`fastapi>=0.133`, `uvicorn>=0.41`); uv resolved
+  current stable releases (fastapi 0.141.1, uvicorn 0.53.0).
+- 2026-09-22: `apps/web/vercel.json` pins only `installCommand`; framework, build command, and output use
+  Vercel's Next.js defaults. Root Directory cannot be versioned in the repository (it is a Vercel project
+  setting), so it is documented in `apps/web/README.md` instead. No `engines` field was added: Next 16
+  requires Node >=20.9.0 and Vercel's default satisfies it, so a pin would guard only against a dashboard
+  misconfiguration.

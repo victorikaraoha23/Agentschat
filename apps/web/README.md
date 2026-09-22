@@ -26,6 +26,21 @@ This app is an **independent** package even though `apps/` is matched by the Her
 app out of the Hermes monorepo's JavaScript workspace and does not pull in the runtime's own JS
 dependencies. `node_modules/` and `package-lock.json` live inside `apps/web/`.
 
+## Deploying to Vercel
+
+The Vercel project must point at this directory:
+
+- **Root Directory** (Vercel project setting): `apps/web` — the repository root belongs to the Hermes
+  runtime, not this application. This setting lives in the Vercel dashboard, so it cannot be versioned
+  here; everything that *can* be versioned is.
+- **Install command** (pinned in `vercel.json`): `npm install --workspaces=false`. Without the flag, npm
+  treats this directory as a member of the Hermes root workspace (its `apps/*` glob) and installs the
+  runtime's JavaScript dependency tree instead of this app's — verified with a local dry run.
+
+Everything else uses Vercel's Next.js defaults: the build command is `npm run build` and the framework
+handles the build output. Next 16 requires Node `>=20.9.0`, which Vercel's default Node version satisfies.
+No environment variables are required yet.
+
 ## Structure
 
 ```text
