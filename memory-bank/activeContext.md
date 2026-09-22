@@ -1,6 +1,6 @@
 # Active Context
 
-- **Date:** 2026-09-22 (Task 0.2 session). Checkout branch `update`.
+- **Date:** 2026-09-22 (Task 1.2 session). Checkout branch `update`.
 - **Current task:** Task 1.2 (web structure and conventions) — complete. Task 1.3 **not** started.
 - **What was done:**
   - **Task 0.1 (2026-09-22):** rewrote root `AGENTS.md` as the AgentsChat engineering constitution
@@ -14,9 +14,9 @@
     gained an AgentsChat section (Next.js output, Node logs, Python tooling artifacts, editors/OS,
     `.env.*.local`). No `apps/web`/`apps/api` directories, no `.env.example`, no dependencies, no tooling
     and no CI were added.
-  - Repository reality: this checkout **is** the Hermes source tree (runtime vendored in-tree); AgentsChat
-    application code does not exist yet. `web/` = Hermes dashboard SPA, `apps/` = Hermes desktop/shared/
-    bootstrap-installer.
+  - Repository reality: this checkout **is** the Hermes source tree (runtime vendored in-tree). `web/` is the
+    Hermes dashboard SPA and `apps/` holds the Hermes desktop/shared/bootstrap-installer packages. AgentsChat
+    application code lives in `apps/web` (added in Task 1.1); `apps/api` does not exist yet.
   - **Task 1.1 (2026-09-22):** `apps/web` initialized (Next `16.3.5`, React `19.2.8`, App Router,
     TypeScript strict, ESLint, no Tailwind) with a single static page naming AgentsChat. Independent npm
     package `agentschat-web` installed via `npm install --workspaces=false`. No API, auth, chat, Supabase or
@@ -26,7 +26,9 @@
     future `components/` and `lib/` locations, `@/*` alias, strict TS, file naming). No new directories,
     configuration, or dependencies.
 - **Open questions / pending user input:**
-  - Should the root `package.json` npm workspace glob (`apps/*`) be scoped before `apps/web` is created?
+  - The root `package.json` npm workspace glob (`apps/*`) still matches `apps/web`. Task 1.1 decided the app is
+    an independent package (`npm install --workspaces=false`); narrowing the glob remains an explicitly scoped
+    Hermes change and is not planned inside any AgentsChat task so far.
   - Should `pyproject.toml`'s `readme = "README.md"` be repointed to `docs/hermes-runtime.md` (moved
     Hermes README), and should `apps/desktop/README.md`'s `../../README.md` link follow it?
 - **Next steps:**
