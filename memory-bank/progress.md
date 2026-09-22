@@ -60,7 +60,7 @@
 ## Backlog / reminders
 - Keep bank in sync when architecture or workflows change (point to `AGENTS.md`/code, don't duplicate).
 - Suggested update ritual: after each task, append decisions + verification under a dated heading here and refresh `activeContext.md`.
-- Validation not yet run: `scripts/run_tests.sh` untouched (no code changed — docs only).
+- Hermes-source tests run through `scripts/run_tests.sh` (never a bare `pytest`) and have not been needed, because no Hermes source has been modified. Web-app changes are validated inside `apps/web` with `npm run lint`, `npm run typecheck`, `npm run build`, and a dev-server render check.
 
 ## Decision log
 - 2026-09-21: Used standard Cline six-file bank (projectbrief/productContext/systemPatterns/techContext/activeContext/progress) since repo-wide search timed out and no existing bank was visible at root listing. Content grounded in `AGENTS.md` + area guides + `README` + `pyproject`, not invented.
