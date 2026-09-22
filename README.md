@@ -13,8 +13,8 @@ execution dependency and which is not itself user-visible.
 
 The repository contains the engineering constitution, the agent-runtime source that AgentsChat depends on,
 and the foundations of both applications (`apps/web`, a single static page; `apps/api`, one health-check
-endpoint). There is **no** database schema, authentication, chat interface, agent execution, or deployment
-configuration yet. Nothing described below as planned is implemented.
+endpoint). There is **no** database schema, authentication, chat interface, agent execution, or production
+deployment yet. Nothing described below as planned is implemented.
 
 ## Planned architecture
 

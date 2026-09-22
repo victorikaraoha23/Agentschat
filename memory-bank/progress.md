@@ -78,6 +78,17 @@
   `npm run typecheck` in `apps/web` exit 0 with zero `git status` changes under `apps/web`; new and edited
   files are LF per `.gitattributes`.
 
+- **Ad-hoc — Vercel readiness for `apps/web`**: proved with a local dry run that plain `npm install` from
+  `apps/web` climbs into the Hermes workspace root (`npm prefix` → repository root; the Hermes root
+  `postinstall` executed), which would misroute a default Vercel install. Added `apps/web/vercel.json`
+  pinning `installCommand` to `npm install --workspaces=false` (the command used since Task 1.1),
+  documented the dashboard-side Root Directory requirement in `apps/web/README.md`, and corrected the root
+  `README.md` claim about deployment configuration. No CI, Docker, or build-output changes.
+- Verified for the Vercel readiness change: the pinned install command re-ran from `apps/web` with the
+  root `package-lock.json` hash unchanged and root `node_modules` still absent; `npm run lint`,
+  `npm run typecheck`, `npm run build` → exit 0; `vercel.json` parses and is not git-ignored while
+  `.vercel/` stays ignored; diff limited to five intended files.
+
 ## Decision log
 - 2026-09-21: Used standard Cline six-file bank (projectbrief/productContext/systemPatterns/techContext/activeContext/progress) since repo-wide search timed out and no existing bank was visible at root listing. Content grounded in `AGENTS.md` + area guides + `README` + `pyproject`, not invented.
 - 2026-09-22: AgentsChat application code will live in `apps/web` (Next.js/TypeScript) and `apps/api`
@@ -114,3 +125,8 @@
   `app.main` from the working directory, so there is no packaging configuration that can drift. Dependency
   floors follow the repository's known-current pins (`fastapi>=0.133`, `uvicorn>=0.41`); uv resolved
   current stable releases (fastapi 0.141.1, uvicorn 0.53.0).
+- 2026-09-22: `apps/web/vercel.json` pins only `installCommand`; framework, build command, and output use
+  Vercel's Next.js defaults. Root Directory cannot be versioned in the repository (it is a Vercel project
+  setting), so it is documented in `apps/web/README.md` instead. No `engines` field was added: Next 16
+  requires Node >=20.9.0 and Vercel's default satisfies it, so a pin would guard only against a dashboard
+  misconfiguration.

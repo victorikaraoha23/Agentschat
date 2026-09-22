@@ -1,6 +1,6 @@
 # Active Context
 
-- **Date:** 2026-09-22 (Task 1.3 session). Checkout branch `update`.
+- **Date:** 2026-09-22 (Vercel readiness for `apps/web`, after Task 1.3). Checkout branch `update`.
 - **Current task:** Task 1.3 (FastAPI foundation) — complete. Task 1.4 **not** started.
 - **What was done:**
   - **Task 0.1 (2026-09-22):** rewrote root `AGENTS.md` as the AgentsChat engineering constitution
@@ -31,6 +31,10 @@
     `tests/test_health.py` via FastAPI's `TestClient`; app-local README documents install/run/test.
     No auth, database, CORS, exception handlers, logging, or Hermes integration; root `README.md`
     status/layout/roadmap/env sections updated.
+  - **Ad-hoc (2026-09-22):** Vercel readiness for `apps/web` — proved plain `npm install` from `apps/web`
+    climbs into the Hermes workspace root; added `apps/web/vercel.json` pinning
+    `installCommand: npm install --workspaces=false`, documented Root Directory = `apps/web` in the app
+    README, and corrected the root README's deployment claim. Not a roadmap task; Task 1.4 still not started.
 - **Open questions / pending user input:**
   - The root `package.json` npm workspace glob (`apps/*`) still matches `apps/web`. Task 1.1 decided the app is
     an independent package (`npm install --workspaces=false`); narrowing the glob remains an explicitly scoped
