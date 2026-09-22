@@ -114,8 +114,8 @@ not restate the build plan.
 ## Environment configuration
 
 No environment variables are required at this stage, so **no AgentsChat `.env.example` exists yet** —
-neither application skeleton needs any configuration. One will be added by the first task that actually
-needs configuration (see `AGENTS.md` §16).
+neither application skeleton needs environment-variable configuration. One will be added by the first task
+that actually needs configuration (see `AGENTS.md` §16).
 
 The root `.env.example` is **upstream Hermes runtime** configuration and is unrelated to AgentsChat: it
 contains non-secret runtime defaults (timeouts, debug flags) plus commented-out placeholder credentials,
