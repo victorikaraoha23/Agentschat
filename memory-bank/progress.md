@@ -11,7 +11,7 @@
 - Verified `memory-bank/` directory listing via `Get-ChildItem` (creation observed).
 
 ## In progress
-- Awaiting user's next task. Task 1.1 is **not** started.
+- Awaiting user's next task. Task 1.3 is **not** started.
 
 ## Done (2026-09-22)
 - **Task 0.1 — engineering constitution** (commit `5026704a4e`): root `AGENTS.md` replaced with the
@@ -34,11 +34,34 @@
   `.gitignore` and these bank notes; `pyproject.toml`, `package.json` and `.env.example` untouched; no
   credentials in any changed file (secret-pattern scan clean); README read end to end and makes no claim
   that a feature exists.
+- **Task 1.1 — Next.js foundation (`apps/web`)**: scaffolded with `create-next-app` (Next `16.3.5`, React
+  `19.2.8`, App Router, TypeScript strict, ESLint, no Tailwind, no `src/`, alias `@/*`). Customized: minimal
+  landing page (`app/page.tsx`) naming AgentsChat and stating that only the skeleton exists, layout metadata
+  + `app/globals.css` base styles (light/dark), package name `agentschat-web`, `typecheck` script
+  (`next typegen && tsc --noEmit`), `public/` kept via `.gitkeep`, `!.env.example` added to the app
+  `.gitignore`, boilerplate README replaced with app-local commands.
+- Verified for Task 1.1: `npm install --workspaces=false` (347 packages, 0 vulnerabilities; `node_modules`
+  and `package-lock.json` stay inside `apps/web`), `npm run lint` exit 0, `npm run typecheck` exit 0,
+  `npm run build` exit 0 (static `/` and `/_not-found` prerendered), dev server returned HTTP 200 with
+  `<title>AgentsChat</title>` and `<h1>AgentsChat</h1>`, then was stopped. No API, auth, chat, Supabase or
+  Hermes integration exists.
+- **Task 1.2 — web structure and conventions**: reviewed the Task 1.1 structure and **kept it unchanged** —
+  it already provides App Router routes (`app/`), a root layout plus one page, and shared styling
+  (`app/globals.css`). No `components/`, `lib/`, `hooks/`, `services/` or `features/` directory was created,
+  because nothing belongs in them yet. The deliverable was the convention set, documented in
+  `apps/web/README.md`: route/layout organization, server-components-first with `"use client"` only where
+  interactivity is needed, styling (global stylesheet plus colocated CSS Modules), where reusable components
+  (`apps/web/components/`) and shared utilities (`apps/web/lib/`) go once they exist, the `@/*` import alias,
+  TypeScript strict rules, file naming, and formatting (no formatter configured, deferred).
+- Verified for Task 1.2: `npm run typecheck` exit 0, `npm run lint` exit 0, `npm run build` exit 0 (static
+  `/` and `/_not-found` prerendered), dev server returned HTTP 200 with `<h1>AgentsChat</h1>`, then stopped.
+  The diff contained `apps/web/README.md` and these bank notes only — no code, config, or dependency change.
 
 ## Backlog / reminders
 - Keep bank in sync when architecture or workflows change (point to `AGENTS.md`/code, don't duplicate).
 - Suggested update ritual: after each task, append decisions + verification under a dated heading here and refresh `activeContext.md`.
-- Validation not yet run: `scripts/run_tests.sh` untouched (no code changed — docs only).
+- Hermes-source tests run through `scripts/run_tests.sh` (never a bare `pytest`) and have not been needed, because no Hermes source has been modified. Web-app changes are validated inside `apps/web` with `npm run lint`, `npm run typecheck`, `npm run build`, and a dev-server render check.
+- Pre-existing repository CI items, verified as **not** caused by the AgentsChat web skeleton and out of scope for these tasks (each needs repo-settings or maintainer action in the Hermes-derived CI): `codeql.yml` ("CodeQL Advanced", a stock template added by `16e5a2161b`, whose matrix includes `ruby` although the checkout has no Ruby sources) fails to complete; `review-labels.yml` requires the `ci-reviewed` label whenever a CI-sensitive file changes, which flagged the scaffold-generated `apps/web/eslint.config.mjs` (added, never edited); Socket reports obfuscation heuristics on `eslint-plugin-react` and `damerau-levenshtein`, both transitive devDependencies of `eslint-config-next`.
 
 ## Decision log
 - 2026-09-21: Used standard Cline six-file bank (projectbrief/productContext/systemPatterns/techContext/activeContext/progress) since repo-wide search timed out and no existing bank was visible at root listing. Content grounded in `AGENTS.md` + area guides + `README` + `pyproject`, not invented.
@@ -54,3 +77,19 @@
 - 2026-09-22: No root `.env.example` was added for AgentsChat — no configuration is required yet, and adding
   placeholder config for features that do not exist is prohibited by `AGENTS.md` §16. Formatting/linting and
   type-check tooling for the applications is deferred to the tasks that create them.
+- 2026-09-22: `apps/web` is an **independent** npm package (`agentschat-web`), installed with
+  `npm install --workspaces=false`, even though the Hermes root `package.json` workspace glob (`apps/*`)
+  matches it. The Hermes-side glob was left untouched: narrowing it is an explicitly scoped Hermes change
+  (root `AGENTS.md` Appendix A), not a side effect of an AgentsChat task.
+- 2026-09-22: Kept the framework-generated `apps/web/AGENTS.md` and `CLAUDE.md` because `next dev` rewrites
+  the agent-rules block (deleting it only re-creates an uncommitted change). The root `AGENTS.md` remains
+  the governing instruction set; the app file only carries Next.js framework guidance.
+- 2026-09-22: Kept the Next 16 scaffold defaults, including the React Compiler
+  (`next.config.ts` → `reactCompiler: true` plus `babel-plugin-react-compiler`), rather than hand-tuning a
+  framework default in a foundation task. `typecheck` runs `next typegen` first because Next 16 route types
+  (`LayoutProps<"/">`) are generated, so `tsc` alone fails on a clean checkout.
+- 2026-09-22: Task 1.2 established web structure and conventions **by documentation only**: no directory,
+  config, or dependency was added. `apps/web/components/` and `apps/web/lib/` are named as the future homes
+  for reusable UI and shared utilities but are deliberately not created (root `AGENTS.md` §5/§18: no
+  speculative structure, no empty packages). `tsconfig.json`, `next.config.ts` and `eslint.config.mjs` were
+  left exactly as Task 1.1 set them, including the Next 16 defaults.
