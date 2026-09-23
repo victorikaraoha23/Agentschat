@@ -21,14 +21,30 @@ uv run uvicorn app.main:app --port 8000   # start the API locally
 
 `GET http://127.0.0.1:8000/health` then returns `200` with `{"status": "healthy"}`.
 
+## Configuration
+
+Settings are centralized in `app/config.py` (Pydantic Settings) and read from `AGENTSCHAT_API_*`
+environment variables. Every setting has a safe default, so no `.env` file is required to start:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `AGENTSCHAT_API_APP_NAME` | `AgentsChat API` | Application name; also the OpenAPI document title |
+| `AGENTSCHAT_API_ENVIRONMENT` | `local` | Environment label for local development |
+
+Invalid values (for example an empty string) fail validation when settings load, naming the offending
+field. This application has no secrets yet, so no `.env.example` exists; the first task that introduces
+a value which must be set per environment adds it (root `AGENTS.md` §16).
+
 ## Structure
 
 ```text
 apps/api/
 ├── app/
 │   ├── __init__.py
-│   └── main.py          # FastAPI application + GET /health
+│   ├── config.py         # centralized settings (AGENTSCHAT_API_*)
+│   └── main.py           # FastAPI application + GET /health
 ├── tests/
+│   ├── test_config.py
 │   └── test_health.py
 ├── pyproject.toml       # dependencies + pytest configuration
 └── uv.lock              # locked dependency versions
