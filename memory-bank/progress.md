@@ -98,6 +98,20 @@
   `npm warn Unknown project config "min-release-age"` lines originate in the Hermes root npm config and are
   pre-existing.
 
+- **Ad-hoc — Vercel Web Analytics + Speed Insights (`apps/web`)**: on explicit owner request, added
+  `@vercel/analytics` 2.0.1 and `@vercel/speed-insights` 2.0.0 (exact pins, matching the existing
+  `dependencies` style) and rendered `<Analytics />` and `<SpeedInsights />` from the root layout. No
+  server, database, secret, environment variable, or new service: the two client components inject Vercel's
+  own platform-served scripts, and nothing else about the application changed. Consent/privacy handling
+  (cookie banner, `beforeSend`) is deliberately deferred.
+- Verified for the analytics change: `npm install --workspaces=false` exit 0 with the lockfile root spec
+  updated to the exact pins; `npm run typecheck` exit 0; `npm run lint` exit 0; `npm run build` exit 0
+  (static `/` and `/_not-found`); dev server returned 200 with the landing content intact; both script
+  references (`/_vercel/insights/script.js`, `/_vercel/speed-insights/script.js`) are present in the built
+  client chunk and absent from prerendered HTML **by design** (the components are `"use client"`, render
+  `null`, and inject in an effect); dev server stopped and port 3000 released. Reporting itself can only be
+  observed on a Vercel deployment, which is outside this repository — stated, not assumed.
+
 ## Backlog / reminders
 - Keep bank in sync when architecture or workflows change (point to `AGENTS.md`/code, don't duplicate).
 - Suggested update ritual: after each task, append decisions + verification under a dated heading here and refresh `activeContext.md`.
@@ -180,6 +194,16 @@
   `allowImportingTsExtensions` because the native runner requires explicit `.ts` specifiers.
 - 2026-09-22: `.env.example` lives in the consuming app (`apps/web/.env.example`), not at the repository
   root, whose `.env.example` is upstream Hermes runtime configuration.
+- 2026-09-22: Vercel Web Analytics and Speed Insights were added on explicit owner request. `AGENTS.md` §4
+  lists monitoring services among what must not be introduced without a concrete, documented requirement;
+  the requirement is now the owner's, and this is its narrowest form — Vercel's first-party integrations,
+  covered by the existing deployment, adding no new service, database, queue, credential, or environment
+  variable. Self-hosted analytics was rejected (it would add a service, §4), as was writing a collector
+  (more code and infrastructure than the need justifies, §5/§17). `AGENTS.md` was deliberately left
+  unmodified: this does not change the standing rules, so future telemetry still needs the same stated
+  requirement.
+- 2026-09-22: Consent/privacy handling for the telemetry (cookie banner, `beforeSend` filtering) is
+  deferred to the task that introduces user accounts and states the privacy requirements.
 - 2026-09-22: configuration uses `pydantic-settings` in a single module with an `AGENTSCHAT_API_` prefix
   (collision-safe against the Hermes process environment) and `lru_cache` — deliberately no `env_file`, so
   no `.env` is ever read and defaults alone start the app. `python-dotenv` arrives transitively but is
