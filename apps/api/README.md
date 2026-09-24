@@ -35,6 +35,14 @@ Invalid values (for example an empty string) fail validation when settings load,
 field. This application has no secrets yet, so no `.env.example` exists; the first task that introduces
 a value which must be set per environment adds it (root `AGENTS.md` §16).
 
+## CORS
+
+The health check is called **from the browser**: the Next.js app runs on `http://localhost:3000` while
+this API runs on `http://127.0.0.1:8000`, so the API allows exactly those two development origins
+(`DEV_ALLOWED_ORIGINS` in `app/main.py`) for `GET` requests. There is no wildcard origin, and no
+production origin is configured yet — that belongs to the task that introduces deployment. An unlisted
+origin receives no `access-control-allow-origin` header, so the browser blocks it.
+
 ## Structure
 
 ```text
@@ -45,6 +53,7 @@ apps/api/
 │   └── main.py           # FastAPI application + GET /health
 ├── tests/
 │   ├── test_config.py
+│   ├── test_cors.py
 │   └── test_health.py
 ├── pyproject.toml       # dependencies + pytest configuration
 └── uv.lock              # locked dependency versions

@@ -95,27 +95,31 @@ Notes for the `apps/*` applications:
 ## Roadmap
 
 **Current stage — Stage 1: application foundation.** Stage 0 (governance, documentation, repository
-hygiene) is complete, and both application skeletons exist: the Next.js web application is buildable and
-renderable, and the FastAPI API starts and serves `GET /health`. No product functionality exists yet.
+hygiene) is complete. Both application skeletons exist and are connected: the Next.js web application
+builds, renders, and calls the FastAPI `GET /health` endpoint from the browser, reporting success or failure
+honestly. No product functionality exists yet.
 
 High-level upcoming stages:
 
-1. The API boundary between the web application and the FastAPI backend, defined and wired end to end.
-2. Authentication and persistent user data on Supabase, with ownership enforced in the API and the
+1. Authentication and persistent user data on Supabase, with ownership enforced in the API and the
    database.
-3. Agent execution wired through the Hermes adapter boundary, with explicit run states, limits, and
+2. Agent execution wired through the Hermes adapter boundary, with explicit run states, limits, and
    cancellation.
-4. The chat experience over real runs, with honest progress reporting and review of results.
-5. Later — files and tools, memory, and multi-agent workflows, each only when the product requires it.
+3. The chat experience over real runs, with honest progress reporting and review of results.
+4. Later — files and tools, memory, and multi-agent workflows, each only when the product requires it.
 
 Detailed sequencing and acceptance criteria belong to the individual tasks; this list intentionally does
 not restate the build plan.
 
 ## Environment configuration
 
-No environment variables are required at this stage, so **no AgentsChat `.env.example` exists yet** —
-neither application skeleton needs environment-variable configuration. One will be added by the first task
-that actually needs configuration (see `AGENTS.md` §16).
+`apps/web` has one **optional, client-visible** variable: `NEXT_PUBLIC_API_URL`, the base URL of the API as
+seen from the browser. It defaults to `http://127.0.0.1:8000`, so local development needs no setup;
+`apps/web/.env.example` documents it. Never place a secret in a `NEXT_PUBLIC_*` variable — those values are
+compiled into the client bundle (`AGENTS.md` §16).
+
+The API needs no configuration to start: every `AGENTSCHAT_API_*` setting has a safe default, documented in
+`apps/api/README.md`.
 
 The root `.env.example` is **upstream Hermes runtime** configuration and is unrelated to AgentsChat: it
 contains non-secret runtime defaults (timeouts, debug flags) plus commented-out placeholder credentials,
