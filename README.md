@@ -59,8 +59,9 @@ Engineering standards, security requirements, testing expectations, and the Defi
 
 AgentsChat application code:
 
-- `apps/web/` — the Next.js web application. Its foundation exists (App Router, TypeScript strict mode,
-  one static page); see [`apps/web/README.md`](./apps/web/README.md) for commands.
+- `apps/web/` — the Next.js web application. Its foundation exists (App Router, TypeScript strict mode, one
+  page that calls the API health check, and Vercel Web Analytics/Speed Insights wired in for the deployed
+  site); see [`apps/web/README.md`](./apps/web/README.md) for commands.
 - `apps/api/` — the FastAPI backend/API. Its foundation exists (`uv`-managed project, one `GET /health`
   endpoint); see [`apps/api/README.md`](./apps/api/README.md) for commands.
 

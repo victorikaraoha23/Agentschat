@@ -58,12 +58,33 @@ handles the build output. Next 16 requires Node `>=20.9.0`, which Vercel's defau
 No environment variable has to be set on the Vercel project: `NEXT_PUBLIC_API_URL` is optional and has a
 local default.
 
+## Analytics and Speed Insights
+
+The root layout renders Vercel's **Web Analytics** (`@vercel/analytics`) and **Speed Insights**
+(`@vercel/speed-insights`) — first-party telemetry for traffic and real-user performance. These are part of
+the deployment story rather than new infrastructure: no server, database, queue, credential, or environment
+variable is involved, and both packages are Vercel's official Next.js integrations.
+
+How they behave (read from the installed packages' source, not assumed):
+
+| Context | Behavior |
+|---|---|
+| On a Vercel deployment | Reports, using the platform-served `/_vercel/insights/script.js` and `/_vercel/speed-insights/script.js`. Enable both features in the project's Analytics and Speed Insights tabs; no code or environment change is needed |
+| `npm run dev` | Loads the vendor's *debug* script, which prints events to the browser console instead of reporting them |
+| Local `npm run build` + `npm start` | Those `/_vercel/...` paths do not exist locally, so the script fails to load and the package logs a console message. The application itself is unaffected |
+
+Both are client components that render `null` and inject their script in an effect, which is why the tags
+never appear in prerendered HTML. No page needs `"use client"` because of them.
+
+**Consent and privacy handling is not implemented** — no cookie banner and no `beforeSend` filtering. That
+belongs to the task that introduces user accounts and states the privacy requirements.
+
 ## Structure
 
 ```text
 apps/web/
 ├── app/
-│   ├── layout.tsx          # root layout (metadata, imports globals.css)
+│   ├── layout.tsx          # root layout: metadata, styles, Vercel telemetry
 │   ├── page.tsx            # landing page: renders and reports the API health check
 │   ├── globals.css         # application-wide styles
 │   ├── health-api.ts       # calls GET /health and returns a typed result

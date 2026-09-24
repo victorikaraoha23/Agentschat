@@ -1,6 +1,6 @@
 # Active Context
 
-- **Date:** 2026-09-22 (Task 1.5 session: the web ↔ API connection). Checkout branch `update`.
+- **Date:** 2026-09-22 (Vercel telemetry addition, after Task 1.5). Checkout branch `update`.
 - **Current task:** Task 1.5 (frontend/API connection) — complete; Phase 1 done. Phase 2 (Task 2.1) **not** started.
 - **What was done:**
   - **Task 0.1 (2026-09-22):** rewrote root `AGENTS.md` as the AgentsChat engineering constitution
@@ -46,6 +46,11 @@
     `apps/web/.env.example`; API gained `CORSMiddleware` with a two-origin dev allowlist for `GET`
     (`apps/api/app/main.py`, `DEV_ALLOWED_ORIGINS`) plus `tests/test_cors.py`; `tsconfig.json` gained
     `allowImportingTsExtensions` for the native test runner. No auth, database, chat, or Hermes work.
+  - **Ad-hoc (2026-09-22):** Vercel **Web Analytics + Speed Insights** wired into the web root layout
+    (`@vercel/analytics` 2.0.1, `@vercel/speed-insights` 2.0.0, exact pins; lockfile updated) on explicit
+    owner request. No server, secret, environment variable, or new service: the client components inject
+    Vercel's own platform-served scripts and only report on a Vercel deployment. Consent/privacy handling
+    deferred. Recorded against `AGENTS.md` §4 (monitoring needs a stated requirement) and §17.
 - **Open questions / pending user input:**
   - The root `package.json` npm workspace glob (`apps/*`) still matches `apps/web`. Task 1.1 decided the app is
     an independent package (`npm install --workspaces=false`); narrowing the glob remains an explicitly scoped
