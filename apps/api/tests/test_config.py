@@ -36,6 +36,8 @@ def test_unprefixed_variables_are_ignored(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Variables without the AGENTSCHAT_API_ prefix cannot leak in from a shared process env."""
+    monkeypatch.delenv("AGENTSCHAT_API_APP_NAME", raising=False)
+    monkeypatch.delenv("AGENTSCHAT_API_ENVIRONMENT", raising=False)
     monkeypatch.setenv("APP_NAME", "Not the API's setting")
 
     settings = Settings()

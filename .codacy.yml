@@ -1,12 +1,30 @@
-# Limit Codacy to the AgentsChat web application. The repository also contains
-# the vendored Hermes runtime and generated/non-UTF-8 artifacts, which are not
-# part of this pull request and can cause Codacy analyzers to fail.
+# Scan the source changed by this pull request. The repository also contains the
+# vendored Hermes runtime and generated/non-UTF-8 artifacts, which are outside the
+# API and can make Codacy analyzers time out or fail while decoding files.
 include_patterns:
-  - "apps/web/**"
+  - "apps/api/**"
 
 exclude_patterns:
-  - "apps/web/node_modules/**"
-  - "apps/web/.next/**"
-  - "apps/web/out/**"
-  - "apps/web/build/**"
-  - "apps/web/coverage/**"
+  - "apps/api/.venv/**"
+  - "apps/api/venv/**"
+  - "apps/api/__pycache__/**"
+  - "apps/api/.pytest_cache/**"
+  - "apps/api/coverage/**"
+  - "apps/api/dist/**"
+  - "apps/api/build/**"
+  - "apps/api/**/*.pyc"
+  - "apps/api/**/*.pyo"
+  - "apps/api/**/*.min.js"
+  - "apps/api/**/*.map"
+  - "apps/api/**/*.png"
+  - "apps/api/**/*.jpg"
+  - "apps/api/**/*.jpeg"
+  - "apps/api/**/*.gif"
+  - "apps/api/**/*.ico"
+  - "apps/api/**/*.webp"
+  - "apps/api/**/*.pdf"
+  - "apps/api/**/*.zip"
+  - "apps/api/**/*.tar"
+  - "apps/api/**/*.gz"
+  - "apps/api/**/*.sqlite"
+  - "apps/api/**/*.db"
