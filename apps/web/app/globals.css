@@ -3,6 +3,8 @@
   --background: #ffffff;
   --foreground: #111111;
   --muted: #5c5c5c;
+  --ok: #1a7f37;
+  --error: #b42318;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -10,6 +12,8 @@
     --background: #0b0b0c;
     --foreground: #f2f2f2;
     --muted: #a3a3a3;
+    --ok: #3fb950;
+    --error: #ff7b72;
   }
 }
 
@@ -49,4 +53,21 @@ p {
 .muted {
   color: var(--muted);
   font-size: 0.95rem;
+}
+
+.status-line {
+  font-weight: 600;
+}
+
+.status-pending {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.status-ok {
+  color: var(--ok);
+}
+
+.status-error {
+  color: var(--error);
 }

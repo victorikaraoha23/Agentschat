@@ -1,7 +1,7 @@
 # Active Context
 
-- **Date:** 2026-09-22 (Task 1.4 session). Checkout branch `update`.
-- **Current task:** Task 1.4 (API configuration) — complete. Task 1.5 **not** started.
+- **Date:** 2026-09-22 (Task 1.5 session: the web ↔ API connection). Checkout branch `update`.
+- **Current task:** Task 1.5 (frontend/API connection) — complete; Phase 1 done. Phase 2 (Task 2.1) **not** started.
 - **What was done:**
   - **Task 0.1 (2026-09-22):** rewrote root `AGENTS.md` as the AgentsChat engineering constitution
     (mission, separation of concerns, dependency direction, simplicity, atomic dev, type safety, API,
@@ -34,11 +34,18 @@
   - **Ad-hoc (2026-09-22):** Vercel readiness for `apps/web` — proved plain `npm install` from `apps/web`
     climbs into the Hermes workspace root; added `apps/web/vercel.json` pinning
     `installCommand: npm install --workspaces=false`, documented Root Directory = `apps/web` in the app
-    README, and corrected the root README's deployment claim. Not a roadmap task; Task 1.4 still not started.
+    README, and corrected the root README's deployment claim. Not a roadmap task.
   - **Task 1.4 (2026-09-22):** centralized API settings in `apps/api/app/config.py` (`pydantic-settings`,
     `AGENTSCHAT_API_` prefix; `app_name` + `environment` only) wired into `FastAPI(title=...)`;
     `/health` unchanged; 5 config tests added (6 total pass). No `.env.example` — no secrets exist yet;
     variables documented in `apps/api/README.md`.
+  - **Task 1.5 (2026-09-22):** the browser now calls the API. `apps/web/app/health-api.ts` (typed,
+    never-throwing result union, injected `fetch` seam) + `app/health-api.test.ts` (Node's built-in
+    `node --test`, 5 tests) + `"use client"` `page.tsx` showing frontend/checking/succeeded/failed states
+    with `aria-live`; single optional `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1:8000`) documented in
+    `apps/web/.env.example`; API gained `CORSMiddleware` with a two-origin dev allowlist for `GET`
+    (`apps/api/app/main.py`, `DEV_ALLOWED_ORIGINS`) plus `tests/test_cors.py`; `tsconfig.json` gained
+    `allowImportingTsExtensions` for the native test runner. No auth, database, chat, or Hermes work.
 - **Open questions / pending user input:**
   - The root `package.json` npm workspace glob (`apps/*`) still matches `apps/web`. Task 1.1 decided the app is
     an independent package (`npm install --workspaces=false`); narrowing the glob remains an explicitly scoped
@@ -46,8 +53,8 @@
   - Should `pyproject.toml`'s `readme = "README.md"` be repointed to `docs/hermes-runtime.md` (moved
     Hermes README), and should `apps/desktop/README.md`'s `../../README.md` link follow it?
 - **Next steps:**
-  - Start Task 1.5 only on explicit instruction; read the root `AGENTS.md`, `apps/web/README.md`, and
-    `apps/api/README.md` first.
+  - Start Task 2.1 (Phase 2) only on explicit instruction; read the root `AGENTS.md`, `apps/web/README.md`,
+    and `apps/api/README.md` first.
   - On code changes: `scripts/run_tests.sh` for Hermes source; keep prompt-caching and profile-scope
     invariants.
 - **Key files for orientation:** `AGENTS.md` → `README.md` → `docs/hermes-runtime.md` → `memory-bank/*`;

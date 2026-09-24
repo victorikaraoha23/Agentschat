@@ -11,7 +11,7 @@
 - Verified `memory-bank/` directory listing via `Get-ChildItem` (creation observed).
 
 ## In progress
-- Awaiting user's next task. Task 1.4 is **not** started.
+- Awaiting user's next task. Task 1.5 is complete; Phase 2 (Task 2.1) is **not** started.
 
 ## Done (2026-09-22)
 - **Task 0.1 — engineering constitution** (commit `5026704a4e`): root `AGENTS.md` replaced with the
@@ -72,6 +72,31 @@
   `Settings(environment="")` raises `ValidationError` naming the field; `apps/api/.env` does not exist;
   both servers stopped and env vars cleared (0 listeners); diff limited to the five API files, the
   updated `apps/api/uv.lock`, and the two memory-bank records.
+
+- **Task 1.5 — web ↔ API connection**: `apps/web/app/health-api.ts` calls `GET /health` with the platform
+  `fetch` behind a typed result union (`ok` / `network` / `http` / `invalid-response`) and never throws;
+  `app/page.tsx` is the smallest `"use client"` component that renders honest states (frontend running /
+  checking / succeeded / failed) in an `aria-live` region. The base URL comes from the single optional
+  `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1:8000`), documented by the new `apps/web/.env.example`;
+  the default is inlined into the client bundle at build time. CORS became real because the call is
+  browser-side: the API allows exactly the two local development origins for `GET` (`DEV_ALLOWED_ORIGINS`,
+  no wildcard, no production origin yet). Frontend tests use Node's built-in runner (`npm test` →
+  `node --test`) with an injected `fetch` seam — no test framework dependency; the native runner needs
+  explicit `.ts` import specifiers, so `tsconfig.json` gained `allowImportingTsExtensions` (legal under the
+  existing `noEmit`). Root and app READMEs, the API's CORS section, and the roadmap were updated.
+- Verified for Task 1.5: `uv run pytest -q` → **11 passed** (6 existing + 5 new CORS tests);
+  `npm test` → **5 passed / 0 failed**; `npm run typecheck` exit 0; `npm run lint` exit 0;
+  `npm run build` exit 0 (static `/` and `/_not-found`); live `uvicorn` plus the real `health-api.ts`
+  module run by Node → `{"ok":true,"status":"healthy"}` (exit 0) and, pointed at a closed port,
+  `{"ok":false,"reason":"network","message":"fetch failed"}` (exit 0, nothing thrown); `curl` with
+  `Origin: http://localhost:3000` → `access-control-allow-origin` present, with an unlisted origin →
+  header absent; dev server returned **200** with the "Frontend: running" / "checking…" markup and the API
+  URL found in a client chunk; both servers stopped and every port released; secret scan clean; new/edited
+  files LF per `.gitattributes`.
+- Observation (not fixed, deliberately deferred): `npm test` prints `MODULE_TYPELESS_PACKAGE_JSON` because
+  `apps/web/package.json` has no `"type": "module"` — a reparse cost in the test run only. The
+  `npm warn Unknown project config "min-release-age"` lines originate in the Hermes root npm config and are
+  pre-existing.
 
 ## Backlog / reminders
 - Keep bank in sync when architecture or workflows change (point to `AGENTS.md`/code, don't duplicate).
@@ -146,6 +171,15 @@
   setting), so it is documented in `apps/web/README.md` instead. No `engines` field was added: Next 16
   requires Node >=20.9.0 and Vercel's default satisfies it, so a pin would guard only against a dashboard
   misconfiguration.
+- 2026-09-22: The web → API boundary is **browser-side** `fetch` with `NEXT_PUBLIC_API_URL`, not a
+  server-component fetch: the browser must reach the API directly, and client-side failure states stay
+  honest. Consequence: CORS is genuinely required, so the API declares an explicit two-origin development
+  allowlist (`DEV_ALLOWED_ORIGINS`) — never `*`; production origins arrive with the deployment task.
+- 2026-09-22: Frontend tests use Node's built-in runner (`node --test`) with an injected `fetch` seam
+  instead of adding Jest/Vitest — no dependency, no network I/O. `tsconfig.json` gained
+  `allowImportingTsExtensions` because the native runner requires explicit `.ts` specifiers.
+- 2026-09-22: `.env.example` lives in the consuming app (`apps/web/.env.example`), not at the repository
+  root, whose `.env.example` is upstream Hermes runtime configuration.
 - 2026-09-22: configuration uses `pydantic-settings` in a single module with an `AGENTSCHAT_API_` prefix
   (collision-safe against the Hermes process environment) and `lru_cache` — deliberately no `env_file`, so
   no `.env` is ever read and defaults alone start the app. `python-dotenv` arrives transitively but is
