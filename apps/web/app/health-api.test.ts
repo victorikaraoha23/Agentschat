@@ -45,6 +45,54 @@ test("returns a network failure when the request rejects", async () => {
   });
 });
 
+test("keeps the deadline active while parsing the response body", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  t.after(() => t.mock.timers.reset());
+
+  let signal: AbortSignal | undefined;
+  const response = healthyResponse();
+  response.json = () =>
+    new Promise((resolve) => {
+      const requestSignal = signal;
+      if (!requestSignal) {
+        throw new Error("Expected an abort signal.");
+      }
+      requestSignal.addEventListener("abort", () => resolve({ status: "healthy" }), {
+        once: true,
+      });
+    });
+
+  const resultPromise = checkApiHealth(async (_, init) => {
+    signal = init?.signal ?? undefined;
+    return response;
+  });
+
+  await new Promise<void>((resolve) => queueMicrotask(resolve));
+  t.mock.timers.tick(5_000);
+
+  assert.deepEqual(await resultPromise, {
+    ok: false,
+    reason: "network",
+    message: "API health check timed out.",
+  });
+});
+
+test("clears the deadline after parsing the response body", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  t.after(() => t.mock.timers.reset());
+
+  let signal: AbortSignal | undefined;
+  const result = await checkApiHealth(async (_, init) => {
+    signal = init?.signal ?? undefined;
+    return healthyResponse();
+  });
+
+  t.mock.timers.tick(5_000);
+
+  assert.deepEqual(result, { ok: true, status: "healthy" });
+  assert.equal(signal?.aborted, false);
+});
+
 test("rejects a 200 response whose body is not valid JSON", async () => {
   const result = await checkApiHealth(
     async () => new Response("<html>oops</html>", { status: 200 }),

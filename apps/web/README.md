@@ -55,8 +55,11 @@ The Vercel project must point at this directory:
 
 Everything else uses Vercel's Next.js defaults: the build command is `npm run build` and the framework
 handles the build output. Next 16 requires Node `>=20.9.0`, which Vercel's default Node version satisfies.
-No environment variable has to be set on the Vercel project: `NEXT_PUBLIC_API_URL` is optional and has a
-local default.
+For the health check to work on Vercel, set `NEXT_PUBLIC_API_URL` to a public API URL in the Vercel build
+environment and add the deployed web origin to the API CORS allowlist. The `127.0.0.1` default is for local
+development only; it cannot reach the API from a deployed browser. The API currently allows development
+origins only, so its production CORS configuration must be added before this integration is available on
+Vercel.
 
 ## Structure
 
