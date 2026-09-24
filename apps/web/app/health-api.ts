@@ -37,55 +37,86 @@ type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
 const defaultFetch: FetchLike = (url, init) => fetch(url, init);
 
+const HEALTH_CHECK_TIMEOUT_MS = 5_000;
+
 /** Request GET /health and classify the outcome; never throws. */
 export async function checkApiHealth(
   fetchImpl: FetchLike = defaultFetch,
 ): Promise<HealthCheckResult> {
   const url = `${API_BASE_URL.replace(/\/+$/, "")}/health`;
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
 
-  let response: Response;
   try {
-    response = await fetchImpl(url);
-  } catch (error: unknown) {
-    return {
-      ok: false,
-      reason: "network",
-      message: error instanceof Error ? error.message : "Request failed.",
-    };
-  }
+    let response: Response;
+    try {
+      response = await fetchImpl(url, { signal: controller.signal });
+    } catch (error: unknown) {
+      return {
+        ok: false,
+        reason: "network",
+        message: error instanceof Error ? error.message : "Request failed.",
+      };
+    }
 
-  if (!response.ok) {
-    return {
-      ok: false,
-      reason: "http",
-      message: `API responded with HTTP ${response.status}.`,
-      statusCode: response.status,
-    };
-  }
+    if (controller.signal.aborted) {
+      return {
+        ok: false,
+        reason: "network",
+        message: "API health check timed out.",
+      };
+    }
 
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    return {
-      ok: false,
-      reason: "invalid-response",
-      message: "API response was not valid JSON.",
-    };
-  }
+    if (!response.ok) {
+      return {
+        ok: false,
+        reason: "http",
+        message: `API responded with HTTP ${response.status}.`,
+        statusCode: response.status,
+      };
+    }
 
-  if (
-    typeof body !== "object" ||
-    body === null ||
-    !("status" in body) ||
-    typeof body.status !== "string"
-  ) {
-    return {
-      ok: false,
-      reason: "invalid-response",
-      message: "API response did not contain a status string.",
-    };
-  }
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      if (controller.signal.aborted) {
+        return {
+          ok: false,
+          reason: "network",
+          message: "API health check timed out.",
+        };
+      }
+      return {
+        ok: false,
+        reason: "invalid-response",
+        message: "API response was not valid JSON.",
+      };
+    }
 
-  return { ok: true, status: body.status };
+    if (controller.signal.aborted) {
+      return {
+        ok: false,
+        reason: "network",
+        message: "API health check timed out.",
+      };
+    }
+
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      !("status" in body) ||
+      typeof body.status !== "string"
+    ) {
+      return {
+        ok: false,
+        reason: "invalid-response",
+        message: "API response did not contain a status string.",
+      };
+    }
+
+    return { ok: true, status: body.status };
+  } finally {
+    clearTimeout(deadline);
+  }
 }
