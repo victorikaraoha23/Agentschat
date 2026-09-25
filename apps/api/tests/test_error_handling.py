@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import DEV_ALLOWED_ORIGINS, app
 
 client = TestClient(app)
 
@@ -74,6 +74,25 @@ def test_unexpected_exception_returns_a_safe_500() -> None:
     body = response.text
     for leaked in ("RuntimeError", "token=abc123", "/home/agentschat", "main.py", "Traceback", "_test"):
         assert leaked not in body
+
+
+def test_unexpected_exception_allows_only_dev_origins() -> None:
+    """Allowed browser origins can read safe 500s; other origins cannot."""
+    with raising_route("/_test/cors-error", RuntimeError("private detail")):
+        for origin in (*DEV_ALLOWED_ORIGINS, "https://evil.example", None):
+            headers = {"Origin": origin} if origin is not None else {}
+            response = TestClient(app, raise_server_exceptions=False).get(
+                "/_test/cors-error", headers=headers
+            )
+
+            assert response.status_code == 500
+            assert response.json() == {"detail": "Internal server error."}
+            if origin in DEV_ALLOWED_ORIGINS:
+                assert response.headers["access-control-allow-origin"] == origin
+                assert response.headers["vary"] == "Origin"
+            else:
+                assert "access-control-allow-origin" not in response.headers
+                assert "vary" not in response.headers
 
 
 def test_health_response_is_still_unwrapped() -> None:

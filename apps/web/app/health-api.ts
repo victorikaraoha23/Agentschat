@@ -56,11 +56,11 @@ export async function checkApiHealth(
     let response: Response;
     try {
       response = await fetchImpl(url, { signal: controller.signal });
-    } catch (error: unknown) {
+    } catch {
       return {
         ok: false,
         reason: "network",
-        message: error instanceof Error ? error.message : "Request failed.",
+        message: "Request failed.",
       };
     }
 

@@ -45,7 +45,7 @@ origin receives no `access-control-allow-origin` header, so the browser blocks i
 
 ## Errors
 
-Expected errors use FastAPI's own shape — a JSON body with a `detail` string — so clients can rely on it:
+Error responses share a JSON `detail` field. Its value depends on the error, including validation errors:
 
 | Case | Status | Body |
 | --- | --- | --- |
