@@ -2,10 +2,13 @@
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+import logging
 
+import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from app.logging_config import LOG_FORMAT
 from app.main import DEV_ALLOWED_ORIGINS, app
 
 client = TestClient(app)
@@ -58,10 +61,11 @@ def test_expected_http_error_keeps_its_status_and_detail() -> None:
     assert response.json() == {"detail": "A run with this id is already running."}
 
 
-def test_unexpected_exception_returns_a_safe_500() -> None:
+def test_unexpected_exception_returns_a_safe_500(caplog: pytest.LogCaptureFixture) -> None:
     """An unhandled exception becomes a generic JSON 500 with nothing internal in it."""
     internal_detail = "RuntimeError in /home/agentschat/app/main.py token=abc123"
 
+    caplog.set_level(logging.ERROR, logger="agentschat")
     with raising_route("/_test/unexpected-error", RuntimeError(internal_detail)):
         # raise_server_exceptions=False lets the test observe the response a real
         # client would receive instead of the exception being re-raised into the test.
@@ -72,8 +76,22 @@ def test_unexpected_exception_returns_a_safe_500() -> None:
     assert response.json() == {"detail": "Internal server error."}
 
     body = response.text
-    for leaked in ("RuntimeError", "token=abc123", "/home/agentschat", "main.py", "Traceback", "_test"):
+    for leaked in ("RuntimeError", "/home/agentschat", "main.py", "Traceback", "_test"):
         assert leaked not in body
+    # The full internal value is checked separately from the short generic
+    # wording asserted exactly above — the secret-like fragment must be absent.
+    assert "token=abc123" not in body
+
+    # The failure is logged once, but its message and traceback stay out of
+    # the formatted log as well as the client response.
+    logged = [record for record in caplog.records if record.name == "agentschat"]
+    assert len(logged) == 1
+    assert logged[0].getMessage() == "Unhandled server exception (type=RuntimeError)."
+    assert logged[0].exc_info is None
+    assert logged[0].stack_info is None
+    formatted_log = logging.Formatter(LOG_FORMAT).format(logged[0])
+    for leaked in ("token=abc123", "/home/agentschat", "main.py", "Traceback"):
+        assert leaked not in formatted_log
 
 
 def test_unexpected_exception_allows_only_dev_origins() -> None:

@@ -241,3 +241,14 @@
   no `.env` is ever read and defaults alone start the app. `python-dotenv` arrives transitively but is
   inert. Absent until a concrete need: CORS, database, auth, provider keys, logging, and any `.env.example`
   template (root `AGENTS.md` §5, §16, §21).
+- 2026-09-25: backend logging is stdlib `logging` only, centralized in `app/logging_config.py`
+  (`configure_logging` + `LOG_FORMAT`, shared `agentschat` logger; `basicConfig` so it composes with
+  Uvicorn's handlers instead of replacing them). The level rides the existing Task 1.4 settings as
+  `AGENTSCHAT_API_LOG_LEVEL` (validated `Literal`, default `INFO`) — no second config system. Logged events
+  are process boundaries (lifespan startup/shutdown `INFO`) and unexpected exceptions (`logger.exception`,
+  `ERROR` with traceback) only: no request logging (Uvicorn access logs already cover it), no per-line
+  tracing. Exception logs carry only the exception type/message/traceback — the request path, headers, and
+  body are never logged, so the generic-500 client contract from Task 2.2 now has a server-side diagnostic
+  half. Frontend logging was reviewed and deliberately left unchanged: the single API-call module already
+  returns typed failures with fixed UI text, so there is nothing useful to log and production console output
+  stays quiet.
