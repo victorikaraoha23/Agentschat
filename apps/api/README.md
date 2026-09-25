@@ -59,16 +59,16 @@ Error responses share a JSON `detail` field. Its value depends on the error, inc
 Success responses (including `GET /health`) are returned unwrapped — there is no response envelope.
 Unexpected exceptions are answered by `unhandled_exception_handler` in `app/main.py`, which always returns
 that fixed message: tracebacks, file paths, secrets, environment values, and internal exception text never
-reach a client. The same handler records the exception server-side with `logger.exception` (type, message,
-and traceback only — never the request path, headers, or body), so a 500 can be diagnosed from the logs.
+reach a client. The same handler logs only the exception type, without its message, traceback, or request
+data.
 
 ## Logging
 
 Logging is centralized in `app/logging_config.py` and uses only Python's standard `logging` module — no
 external service, no custom framework, no log aggregation. Import-time `configure_logging` applies the
-`AGENTSCHAT_API_LOG_LEVEL` setting to the root logger with one readable local-development format
-(`LOG_FORMAT`: timestamp, level, logger name, message). `INFO` is the default; `DEBUG` is available for
-local troubleshooting.
+`AGENTSCHAT_API_LOG_LEVEL` setting to the root logger. When no root handler exists, it adds one with a
+readable local-development format (`LOG_FORMAT`: timestamp, level, logger name, message). Existing handlers
+and their formatters are preserved. `INFO` is the default; `DEBUG` is available for local troubleshooting.
 
 Logged events are deliberately minimal — process boundaries and unexpected failures only:
 
@@ -76,7 +76,7 @@ Logged events are deliberately minimal — process boundaries and unexpected fai
 | --- | --- | --- |
 | Startup | `INFO` | `AgentsChat API starting (environment=…).` |
 | Shutdown | `INFO` | `AgentsChat API shutting down.` |
-| Unexpected exception | `ERROR` | `Unhandled server exception.` + traceback |
+| Unexpected exception | `ERROR` | `Unhandled server exception (type=…).` |
 
 Request logging is intentionally absent: Uvicorn's own access logs already cover requests, so duplicating
 them would only add noise. Nothing logs passwords, tokens, API keys, secrets, cookies, authorization

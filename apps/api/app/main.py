@@ -62,11 +62,10 @@ async def unhandled_exception_handler(request: Request, _exc: Exception) -> JSON
     """Answer an unexpected server error with a safe, predictable JSON body.
 
     The message is deliberately generic. Tracebacks, file paths, secrets, and
-    internal exception text must never reach a client. ``logger.exception``
-    records the type, message, and traceback server-side only — the request
-    itself (path, headers, body) is never logged.
+    internal exception text must never reach a client or log. Only the
+    exception type is logged, without its message, traceback, or request data.
     """
-    logger.exception("Unhandled server exception.")
+    logger.error("Unhandled server exception (type=%s).", type(_exc).__name__)
 
     origin = request.headers.get("origin")
     headers: dict[str, str] = {}

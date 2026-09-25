@@ -1,6 +1,7 @@
 """Logging foundation: configuration initializes, the app starts, errors stay safe (Task 2.3)."""
 
 import asyncio
+import io
 import logging
 
 import pytest
@@ -20,6 +21,34 @@ def test_configure_logging_returns_a_usable_logger() -> None:
         assert logging.getLogger().level == logging.WARNING
     finally:
         configure_logging("INFO")
+
+
+def test_configure_logging_sets_root_level_with_an_existing_handler() -> None:
+    """A preconfigured root handler does not prevent the requested level."""
+    root = logging.getLogger()
+    app_logger = logging.getLogger("agentschat")
+    original_handlers = list(root.handlers)
+    original_root_level = root.level
+    original_app_level = app_logger.level
+    stream = io.StringIO()
+    existing_handler = logging.StreamHandler(stream)
+    existing_formatter = logging.Formatter("existing: %(message)s")
+    existing_handler.setFormatter(existing_formatter)
+    root.addHandler(existing_handler)
+
+    try:
+        root.setLevel(logging.ERROR)
+        configure_logging("WARNING")
+
+        assert root.level == logging.WARNING
+        assert root.handlers == [*original_handlers, existing_handler]
+        assert existing_handler.formatter is existing_formatter
+        app_logger.warning("level probe")
+        assert stream.getvalue() == "existing: level probe\n"
+    finally:
+        root.removeHandler(existing_handler)
+        root.setLevel(original_root_level)
+        app_logger.setLevel(original_app_level)
 
 
 def test_log_format_carries_timestamp_level_and_logger_name() -> None:
