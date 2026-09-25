@@ -43,6 +43,23 @@ this API runs on `http://127.0.0.1:8000`, so the API allows exactly those two de
 production origin is configured yet — that belongs to the task that introduces deployment. An unlisted
 origin receives no `access-control-allow-origin` header, so the browser blocks it.
 
+## Errors
+
+Expected errors use FastAPI's own shape — a JSON body with a `detail` string — so clients can rely on it:
+
+| Case | Status | Body |
+| --- | --- | --- |
+| Unknown path | `404` | `{"detail": "Not Found"}` |
+| Unsupported method on a known path | `405` | `{"detail": "Method Not Allowed"}` |
+| Invalid input | `422` | FastAPI's validation detail |
+| Raised `HTTPException` | as raised | `{"detail": "<message>"}` |
+| **Unexpected exception** | `500` | `{"detail": "Internal server error."}` |
+
+Success responses (including `GET /health`) are returned unwrapped — there is no response envelope.
+Unexpected exceptions are answered by `unhandled_exception_handler` in `app/main.py`, which always returns
+that fixed message: tracebacks, file paths, secrets, environment values, and internal exception text never
+reach a client. Recording the details server-side belongs to Task 2.3 — no logging is configured yet.
+
 ## Structure
 
 ```text
@@ -54,6 +71,7 @@ apps/api/
 ├── tests/
 │   ├── test_config.py
 │   ├── test_cors.py
+│   ├── test_error_handling.py
 │   └── test_health.py
 ├── pyproject.toml       # dependencies + pytest configuration
 └── uv.lock              # locked dependency versions

@@ -27,7 +27,8 @@ export type HealthCheckResult =
   | { ok: true; status: string }
   | { ok: false; reason: "network"; message: string }
   | { ok: false; reason: "http"; message: string; statusCode: number }
-  | { ok: false; reason: "invalid-response"; message: string };
+  | { ok: false; reason: "invalid-response"; message: string }
+  | { ok: false; reason: "unexpected"; message: string };
 
 /**
  * The subset of `fetch` this module uses — the seam tests inject, so tests
@@ -38,6 +39,10 @@ type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 const defaultFetch: FetchLike = (url, init) => fetch(url, init);
 
 const HEALTH_CHECK_TIMEOUT_MS = 5_000;
+
+/** Shown when something outside the classified cases fails; never carries raw error text. */
+const UNEXPECTED_FAILURE_MESSAGE =
+  "An unexpected error occurred while checking the API.";
 
 /** Request GET /health and classify the outcome; never throws. */
 export async function checkApiHealth(
@@ -116,6 +121,10 @@ export async function checkApiHealth(
     }
 
     return { ok: true, status: body.status };
+  } catch {
+    // Anything not classified above — for example a response object that misbehaves —
+    // is an unexpected failure. Report it safely rather than letting it reach the page.
+    return { ok: false, reason: "unexpected", message: UNEXPECTED_FAILURE_MESSAGE };
   } finally {
     clearTimeout(deadline);
   }
