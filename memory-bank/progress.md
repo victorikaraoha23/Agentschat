@@ -112,6 +112,25 @@
   `null`, and inject in an effect); dev server stopped and port 3000 released. Reporting itself can only be
   observed on a Vercel deployment, which is outside this repository — stated, not assumed.
 
+- **Task 2.2 — error-handling foundation**: the API has one predictable error shape and cannot leak
+  internals. Expected errors keep FastAPI's own `{"detail": ...}` body (`HTTPException`, 404/405, 422) — no
+  bespoke schema or dependency was needed. Unexpected exceptions are answered by
+  `unhandled_exception_handler` in `app/main.py` with a fixed `{"detail": "Internal server error."}` JSON
+  body, so tracebacks, file paths, secrets, environment values and exception text never reach a client.
+  `GET /health` is untouched and still unwrapped. The web API boundary (`apps/web/app/health-api.ts`) gained
+  an `unexpected` failure category with a fixed message (raw error text is never included), joining
+  `network`, `http` and `invalid-response`, so all five outcomes the task lists are distinguishable. No
+  logging (Task 2.3 owns it), no error-code hierarchy, no global frontend error state, no retries or circuit
+  breakers.
+- Verified for Task 2.2: `uv run pytest -q` → **16 passed** (5 new error-handling tests including the safe
+  500 and its leak assertions); `npm test` → **8 passed / 0 failed**; `npm run typecheck` exit 0;
+  `npm run lint` exit 0; `npm run build` exit 0; live `uvicorn` → `/health` 200 `{"status": "healthy"}`,
+  unknown path 404 `{"detail": "Not Found"}`, wrong method 405 `{"detail": "Method Not Allowed"}`, all
+  `application/json`; server stopped and port 8000 released.
+- Observation for the next task: the first live-check attempt failed because `uv` was started without
+  `-WorkingDirectory`, so it ran from the repository root and never served; re-run with
+  `-WorkingDirectory apps/api` and it worked. The same applies to any future scripted server start.
+
 ## Backlog / reminders
 - Keep bank in sync when architecture or workflows change (point to `AGENTS.md`/code, don't duplicate).
 - Suggested update ritual: after each task, append decisions + verification under a dated heading here and refresh `activeContext.md`.
@@ -204,6 +223,19 @@
   requirement.
 - 2026-09-22: Consent/privacy handling for the telemetry (cookie banner, `beforeSend` filtering) is
   deferred to the task that introduces user accounts and states the privacy requirements.
+- 2026-09-22: The API error model is FastAPI's own `{"detail": ...}` shape rather than a bespoke envelope —
+  it already covers expected errors (`HTTPException`, router 404/405, 422 validation), needs no new
+  dependency or schema, and matches the frontend's existing `http` category. Only unexpected exceptions
+  needed an explicit handler, because Starlette's default 500 body is plain text, not the JSON clients
+  expect.
+- 2026-09-22: The generic 500 handler returns a fixed message and deliberately records nothing yet — no
+  logging is configured in this repository, and Task 2.3 owns logging. It is registered with
+  `app.add_exception_handler(Exception, ...)`; the test triggers a genuine unexpected exception through a
+  route registered inside the test (and restored afterwards) so the product gains no endpoint merely to be
+  testable, and uses `TestClient(app, raise_server_exceptions=False)` to observe what a real client would
+  receive.
+- 2026-09-22: The frontend `unexpected` category exists because a response object can misbehave in ways the
+  three named categories do not cover; it carries a fixed message so no raw error text can reach the UI.
 - 2026-09-22: configuration uses `pydantic-settings` in a single module with an `AGENTSCHAT_API_` prefix
   (collision-safe against the Hermes process environment) and `lru_cache` — deliberately no `env_file`, so
   no `.env` is ever read and defaults alone start the app. `python-dotenv` arrives transitively but is

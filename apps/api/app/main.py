@@ -1,7 +1,8 @@
 """AgentsChat FastAPI application: minimal foundation with a health check."""
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.config import get_settings
@@ -36,6 +37,28 @@ app.add_middleware(
     allow_methods=["GET"],
     allow_headers=["*"],
 )
+
+
+# Error model (Task 2.2): expected errors keep FastAPI's own `{"detail": ...}` shape —
+# `HTTPException`, the router's 404/405, and 422 validation errors are already handled
+# by FastAPI. Only unexpected exceptions need an explicit handler so they cannot leak
+# internals (root AGENTS.md §10, §13).
+async def unhandled_exception_handler(request: Request, _exc: Exception) -> JSONResponse:
+    """Answer an unexpected server error with a safe, predictable JSON body.
+
+    The message is deliberately generic. Tracebacks, file paths, secrets, and
+    internal exception text must never reach a client. Recording the details
+    server-side is Task 2.3's job — no logging is configured yet.
+    """
+
+    origin = request.headers.get("origin")
+    headers: dict[str, str] = {}
+    if origin is not None and origin in DEV_ALLOWED_ORIGINS:
+        headers = {"Access-Control-Allow-Origin": origin, "Vary": "Origin"}
+    return JSONResponse(status_code=500, content={"detail": "Internal server error."}, headers=headers)
+
+
+app.add_exception_handler(Exception, unhandled_exception_handler)
 
 
 @app.get("/health", response_model=HealthResponse)

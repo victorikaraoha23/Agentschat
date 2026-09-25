@@ -35,13 +35,13 @@ test("returns an http failure for an unsuccessful response", async () => {
 
 test("returns a network failure when the request rejects", async () => {
   const result = await checkApiHealth(async () => {
-    throw new TypeError("fetch failed");
+    throw new TypeError("private fetch error");
   });
 
   assert.deepEqual(result, {
     ok: false,
     reason: "network",
-    message: "fetch failed",
+    message: "Request failed.",
   });
 });
 
@@ -127,4 +127,25 @@ test("rejects valid JSON that does not carry a status string", async () => {
       }),
   );
   assert.equal(notAnObject.ok, false);
+});
+
+test("reports an unexpected failure when the response object misbehaves", async () => {
+  const broken = new Response("{}", { status: 200 });
+  Object.defineProperty(broken, "ok", {
+    get: () => {
+      throw new Error("raw internal detail: /Users/hp/secret.ts token=abc123");
+    },
+  });
+
+  const result = await checkApiHealth(async () => broken);
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "unexpected",
+    message: "An unexpected error occurred while checking the API.",
+  });
+  const rendered = JSON.stringify(result);
+  for (const leaked of ["secret.ts", "token=abc123", "raw internal detail"]) {
+    assert.equal(rendered.includes(leaked), false);
+  }
 });

@@ -1,7 +1,7 @@
 # Active Context
 
-- **Date:** 2026-09-22 (Vercel telemetry addition, after Task 1.5). Checkout branch `update`.
-- **Current task:** Task 1.5 (frontend/API connection) — complete; Phase 1 done. Phase 2 (Task 2.1) **not** started.
+- **Date:** 2026-09-22 (Task 2.2 session: error-handling foundation). Checkout branch `update`.
+- **Current task:** Task 2.2 (error-handling foundation) — complete. Task 2.3 **not** started.
 - **What was done:**
   - **Task 0.1 (2026-09-22):** rewrote root `AGENTS.md` as the AgentsChat engineering constitution
     (mission, separation of concerns, dependency direction, simplicity, atomic dev, type safety, API,
@@ -51,6 +51,15 @@
     owner request. No server, secret, environment variable, or new service: the client components inject
     Vercel's own platform-served scripts and only report on a Vercel deployment. Consent/privacy handling
     deferred. Recorded against `AGENTS.md` §4 (monitoring needs a stated requirement) and §17.
+  - **Task 2.1 (2026-09-22, earlier session):** `fix(web)` added a five-second API health-check timeout in
+    `apps/web/app/health-api.ts` (AbortController, timeout classified as a `network` failure) with two extra
+    tests; `test(api)` isolated the unprefixed-settings test from ambient environment variables.
+  - **Task 2.2 (2026-09-22):** error-handling foundation. Backend: `unhandled_exception_handler` in
+    `app/main.py` (`app.add_exception_handler(Exception, ...)`) answers unexpected exceptions with a fixed
+    `{"detail": "Internal server error."}` JSON 500; expected errors keep FastAPI's `{"detail": ...}` shape;
+    `/health` unchanged; new `tests/test_error_handling.py` (5 tests, incl. leak assertions). Frontend: an
+    `unexpected` failure category with a fixed message added to `HealthCheckResult`, plus its test. Docs:
+    API `## Errors` section, web failure-category wording, `apps/api/README.md` structure.
 - **Open questions / pending user input:**
   - The root `package.json` npm workspace glob (`apps/*`) still matches `apps/web`. Task 1.1 decided the app is
     an independent package (`npm install --workspaces=false`); narrowing the glob remains an explicitly scoped
@@ -58,8 +67,8 @@
   - Should `pyproject.toml`'s `readme = "README.md"` be repointed to `docs/hermes-runtime.md` (moved
     Hermes README), and should `apps/desktop/README.md`'s `../../README.md` link follow it?
 - **Next steps:**
-  - Start Task 2.1 (Phase 2) only on explicit instruction; read the root `AGENTS.md`, `apps/web/README.md`,
-    and `apps/api/README.md` first.
+  - Start Task 2.3 only on explicit instruction; read the root `AGENTS.md`, `apps/api/README.md`, and
+    `apps/web/README.md` first.
   - On code changes: `scripts/run_tests.sh` for Hermes source; keep prompt-caching and profile-scope
     invariants.
 - **Key files for orientation:** `AGENTS.md` → `README.md` → `docs/hermes-runtime.md` → `memory-bank/*`;

@@ -31,9 +31,12 @@ compiled into the browser bundle (`apps/web/.env.example` documents it):
 | `NEXT_PUBLIC_API_URL` | `http://127.0.0.1:8000` | Base URL of the AgentsChat API as seen from the browser |
 
 No `.env` file is needed: the default is the local API. The page reaches the API only through
-`app/health-api.ts`, which builds the request URL, checks the HTTP status, validates the response shape and
-returns a typed result. It never throws, so an unreachable or misbehaving API produces a visible failure
-state instead of crashing the page.
+`app/health-api.ts`, which builds the request URL, applies a five-second deadline, checks the HTTP status,
+validates the response shape and returns a typed result. Failures are categorised so the UI can tell them
+apart: `network` (unreachable or timed out), `http` (non-success status, reported by status code only),
+`invalid-response` (malformed body or unexpected shape) and `unexpected` (anything else). The message shown
+to users is always this module's own text — never a raw server body, stack trace, or error object — and the
+function never throws, so a misbehaving API produces a visible failure state instead of crashing the page.
 
 ## Note on npm workspaces
 
