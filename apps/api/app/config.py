@@ -6,9 +6,12 @@ local-development default, so the API starts with no ``.env`` file and no secret
 """
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+LogLevelName = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 
 class Settings(BaseSettings):
@@ -27,6 +30,10 @@ class Settings(BaseSettings):
         default="local",
         min_length=1,
         description="Environment label for local development.",
+    )
+    log_level: LogLevelName = Field(
+        default="INFO",
+        description="Root log level for local-development output (e.g. INFO, DEBUG).",
     )
 
 

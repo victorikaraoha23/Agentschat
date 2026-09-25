@@ -1,13 +1,27 @@
 """AgentsChat FastAPI application: minimal foundation with a health check."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.config import get_settings
+from app.logging_config import configure_logging, logger
 
 settings = get_settings()
+
+configure_logging(settings.log_level)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Log process boundaries once per startup/shutdown — never per request."""
+    logger.info("AgentsChat API starting (environment=%s).", settings.environment)
+    yield
+    logger.info("AgentsChat API shutting down.")
 
 
 class HealthResponse(BaseModel):
@@ -29,6 +43,7 @@ app = FastAPI(
     title=settings.app_name,
     description="Backend API for AgentsChat.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -47,9 +62,11 @@ async def unhandled_exception_handler(_request: Request, _exc: Exception) -> JSO
     """Answer an unexpected server error with a safe, predictable JSON body.
 
     The message is deliberately generic. Tracebacks, file paths, secrets, and
-    internal exception text must never reach a client. Recording the details
-    server-side is Task 2.3's job — no logging is configured yet.
+    internal exception text must never reach a client. ``logger.exception``
+    records the type, message, and traceback server-side only — the request
+    itself (path, headers, body) is never logged.
     """
+    logger.exception("Unhandled server exception.")
 
     return JSONResponse(status_code=500, content={"detail": "Internal server error."})
 

@@ -30,6 +30,7 @@ environment variables. Every setting has a safe default, so no `.env` file is re
 | --- | --- | --- |
 | `AGENTSCHAT_API_APP_NAME` | `AgentsChat API` | Application name; also the OpenAPI document title |
 | `AGENTSCHAT_API_ENVIRONMENT` | `local` | Environment label for local development |
+| `AGENTSCHAT_API_LOG_LEVEL` | `INFO` | Root log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`); unknown values fail validation |
 
 Invalid values (for example an empty string) fail validation when settings load, naming the offending
 field. This application has no secrets yet, so no `.env.example` exists; the first task that introduces
@@ -58,7 +59,28 @@ Expected errors use FastAPI's own shape — a JSON body with a `detail` string �
 Success responses (including `GET /health`) are returned unwrapped — there is no response envelope.
 Unexpected exceptions are answered by `unhandled_exception_handler` in `app/main.py`, which always returns
 that fixed message: tracebacks, file paths, secrets, environment values, and internal exception text never
-reach a client. Recording the details server-side belongs to Task 2.3 — no logging is configured yet.
+reach a client. The same handler records the exception server-side with `logger.exception` (type, message,
+and traceback only — never the request path, headers, or body), so a 500 can be diagnosed from the logs.
+
+## Logging
+
+Logging is centralized in `app/logging_config.py` and uses only Python's standard `logging` module — no
+external service, no custom framework, no log aggregation. Import-time `configure_logging` applies the
+`AGENTSCHAT_API_LOG_LEVEL` setting to the root logger with one readable local-development format
+(`LOG_FORMAT`: timestamp, level, logger name, message). `INFO` is the default; `DEBUG` is available for
+local troubleshooting.
+
+Logged events are deliberately minimal — process boundaries and unexpected failures only:
+
+| Event | Level | Message |
+| --- | --- | --- |
+| Startup | `INFO` | `AgentsChat API starting (environment=…).` |
+| Shutdown | `INFO` | `AgentsChat API shutting down.` |
+| Unexpected exception | `ERROR` | `Unhandled server exception.` + traceback |
+
+Request logging is intentionally absent: Uvicorn's own access logs already cover requests, so duplicating
+them would only add noise. Nothing logs passwords, tokens, API keys, secrets, cookies, authorization
+headers, full request bodies, user private data, environment values, or database credentials.
 
 ## Structure
 
@@ -67,12 +89,14 @@ apps/api/
 ├── app/
 │   ├── __init__.py
 │   ├── config.py         # centralized settings (AGENTSCHAT_API_*)
+│   ├── logging_config.py # central logging setup (stdlib only, LOG_FORMAT)
 │   └── main.py           # FastAPI application + GET /health
 ├── tests/
 │   ├── test_config.py
 │   ├── test_cors.py
 │   ├── test_error_handling.py
-│   └── test_health.py
+│   ├── test_health.py
+│   └── test_logging.py
 ├── pyproject.toml       # dependencies + pytest configuration
 └── uv.lock              # locked dependency versions
 ```

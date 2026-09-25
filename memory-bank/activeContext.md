@@ -1,7 +1,7 @@
 # Active Context
 
-- **Date:** 2026-09-22 (Task 2.2 session: error-handling foundation). Checkout branch `update`.
-- **Current task:** Task 2.2 (error-handling foundation) — complete. Task 2.3 **not** started.
+- **Date:** 2026-09-25 (Task 2.3 session: logging foundation). Checkout branch `update`.
+- **Current task:** Task 2.3 (logging foundation) — implementation + verification complete; commit pending.
 - **What was done:**
   - **Task 0.1 (2026-09-22):** rewrote root `AGENTS.md` as the AgentsChat engineering constitution
     (mission, separation of concerns, dependency direction, simplicity, atomic dev, type safety, API,
@@ -60,6 +60,15 @@
     `/health` unchanged; new `tests/test_error_handling.py` (5 tests, incl. leak assertions). Frontend: an
     `unexpected` failure category with a fixed message added to `HealthCheckResult`, plus its test. Docs:
     API `## Errors` section, web failure-category wording, `apps/api/README.md` structure.
+  - **Task 2.3 (2026-09-25):** logging foundation — backend only, frontend deliberately unchanged (its one
+    API-call module already reports typed failures with fixed UI text; nothing worth logging exists, and
+    production console output stays quiet). New `apps/api/app/logging_config.py` (stdlib `logging` only:
+    `configure_logging` + `LOG_FORMAT` timestamp/level/name/message, shared `agentschat` logger); new
+    `AGENTSCHAT_API_LOG_LEVEL` setting (validated `Literal`, default `INFO`); `app/main.py` wires a
+    `lifespan` (startup/shutdown `INFO` boundary logs, never per-request) and `logger.exception` in the
+    generic-500 handler (traceback server-side only; request path/headers/body never logged). No request
+    logging added — Uvicorn access logs already cover it. Tests: `tests/test_logging.py` (configure/format,
+    app start, lifespan boundaries) + extended config/error tests; README `## Logging` section.
 - **Open questions / pending user input:**
   - The root `package.json` npm workspace glob (`apps/*`) still matches `apps/web`. Task 1.1 decided the app is
     an independent package (`npm install --workspaces=false`); narrowing the glob remains an explicitly scoped

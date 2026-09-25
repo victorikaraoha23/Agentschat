@@ -2,7 +2,9 @@
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+import logging
 
+import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -58,10 +60,11 @@ def test_expected_http_error_keeps_its_status_and_detail() -> None:
     assert response.json() == {"detail": "A run with this id is already running."}
 
 
-def test_unexpected_exception_returns_a_safe_500() -> None:
+def test_unexpected_exception_returns_a_safe_500(caplog: pytest.LogCaptureFixture) -> None:
     """An unhandled exception becomes a generic JSON 500 with nothing internal in it."""
     internal_detail = "RuntimeError in /home/agentschat/app/main.py token=abc123"
 
+    caplog.set_level(logging.ERROR, logger="agentschat")
     with raising_route("/_test/unexpected-error", RuntimeError(internal_detail)):
         # raise_server_exceptions=False lets the test observe the response a real
         # client would receive instead of the exception being re-raised into the test.
@@ -72,8 +75,20 @@ def test_unexpected_exception_returns_a_safe_500() -> None:
     assert response.json() == {"detail": "Internal server error."}
 
     body = response.text
-    for leaked in ("RuntimeError", "token=abc123", "/home/agentschat", "main.py", "Traceback", "_test"):
+    for leaked in ("RuntimeError", "/home/agentschat", "main.py", "Traceback", "_test"):
         assert leaked not in body
+    # The full internal value is checked separately from the short generic
+    # wording asserted exactly above — the secret-like fragment must be absent.
+    assert "token=abc123" not in body
+
+    # The safe client response must not silence the failure server-side: the
+    # exception is logged once, with its traceback, on the shared logger. The
+    # log itself is server-side only — the client assertions above prove the
+    # internal detail does not reach the response.
+    logged = [record for record in caplog.records if record.name == "agentschat"]
+    assert len(logged) == 1
+    assert logged[0].message == "Unhandled server exception."
+    assert logged[0].exc_info is not None
 
 
 def test_health_response_is_still_unwrapped() -> None:
