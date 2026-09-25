@@ -35,13 +35,13 @@ test("returns an http failure for an unsuccessful response", async () => {
 
 test("returns a network failure when the request rejects", async () => {
   const result = await checkApiHealth(async () => {
-    throw new TypeError("fetch failed");
+    throw new TypeError("private fetch error");
   });
 
   assert.deepEqual(result, {
     ok: false,
     reason: "network",
-    message: "fetch failed",
+    message: "Request failed.",
   });
 });
 
