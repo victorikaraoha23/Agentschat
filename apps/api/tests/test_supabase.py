@@ -73,9 +73,13 @@ def test_client_initializes_from_valid_configuration() -> None:
     assert client is not None
 
 
-def test_lifespan_runs_unconfigured_without_crashing(caplog: pytest.LogCaptureFixture) -> None:
+def test_lifespan_runs_unconfigured_without_crashing(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Startup with no Supabase variables logs the state and still serves /health."""
     caplog.set_level(logging.INFO, logger="agentschat")
+    settings = Settings(supabase_url=None, supabase_service_role_key=None)
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
 
     with TestClient(app) as client:
         response = client.get("/health")
