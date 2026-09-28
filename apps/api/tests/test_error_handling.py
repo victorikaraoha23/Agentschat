@@ -8,6 +8,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from app.logging_config import LOG_FORMAT
 from app.main import DEV_ALLOWED_ORIGINS, app
 
 client = TestClient(app)
@@ -81,14 +82,16 @@ def test_unexpected_exception_returns_a_safe_500(caplog: pytest.LogCaptureFixtur
     # wording asserted exactly above — the secret-like fragment must be absent.
     assert "token=abc123" not in body
 
-    # The safe client response must not silence the failure server-side: the
-    # exception is logged once, with its traceback, on the shared logger. The
-    # log itself is server-side only — the client assertions above prove the
-    # internal detail does not reach the response.
+    # The failure is logged once, but its message and traceback stay out of
+    # the formatted log as well as the client response.
     logged = [record for record in caplog.records if record.name == "agentschat"]
     assert len(logged) == 1
-    assert logged[0].message == "Unhandled server exception."
-    assert logged[0].exc_info is not None
+    assert logged[0].getMessage() == "Unhandled server exception (type=RuntimeError)."
+    assert logged[0].exc_info is None
+    assert logged[0].stack_info is None
+    formatted_log = logging.Formatter(LOG_FORMAT).format(logged[0])
+    for leaked in ("token=abc123", "/home/agentschat", "main.py", "Traceback"):
+        assert leaked not in formatted_log
 
 
 def test_unexpected_exception_allows_only_dev_origins() -> None:

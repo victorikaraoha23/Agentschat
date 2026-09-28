@@ -6,9 +6,8 @@ local-development output: timestamps, level, logger name, and message.
 
 Sensitive information must never reach a log call: no passwords, tokens, API
 keys, secrets, cookies, authorization headers, full request bodies, user
-private data, environment values, or database credentials. The only exception
-context logged is the exception itself (type, message, traceback via
-``logger.exception``) — never the request path, headers, or body.
+private data, environment values, or database credentials. Unexpected failures
+log only the exception type — never its message, traceback, or request data.
 """
 
 from __future__ import annotations
@@ -25,11 +24,12 @@ LOG_FORMAT: Final[str] = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 def configure_logging(level: int | str = logging.INFO) -> logging.Logger:
     """Configure the root logger once and return the shared logger.
 
-    ``logging.basicConfig`` is a no-op once handlers exist, so calling this
-    twice (or after Uvicorn has configured logging) only adjusts the level.
+    Existing handlers keep their formatters. ``logging.basicConfig`` adds a
+    handler only when none exists, so set the root level separately as well.
     Returns the ``agentschat`` logger so call sites share one origin name.
     """
     logging.basicConfig(level=level, format=LOG_FORMAT, force=False)
+    logging.getLogger().setLevel(level)
     logger = logging.getLogger("agentschat")
     logger.setLevel(level)
     return logger
