@@ -69,3 +69,43 @@ def test_invalid_log_level_is_rejected() -> None:
     """An unknown log level fails validation with the offending field named."""
     with pytest.raises(ValidationError, match="log_level"):
         Settings(log_level="VERBOSE")  # type: ignore[arg-type]
+
+
+def test_half_pair_error_does_not_print_service_role_key(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("AGENTSCHAT_API_SUPABASE_URL", raising=False)
+    key = "test-sensitive-service-role-key"
+    monkeypatch.setenv("AGENTSCHAT_API_SUPABASE_SERVICE_ROLE_KEY", key)
+
+    with pytest.raises(ValidationError) as caught:
+        Settings()
+
+    print(caught.value)
+    output = capsys.readouterr().out
+    assert "must be set together" in output
+    assert key not in output
+
+
+def test_settings_representation_omits_service_role_key() -> None:
+    key = "test-sensitive-service-role-key"
+    settings = Settings(
+        supabase_url="https://example.supabase.co", supabase_service_role_key=key
+    )
+
+    assert key not in repr(settings)
+    assert key not in str(settings)
+
+
+@pytest.mark.parametrize("blank", ["", " ", "\t\n"])
+@pytest.mark.parametrize("pair", ["url", "key", "both", "url_only", "key_only"])
+def test_blank_supabase_credentials_are_rejected(blank: str, pair: str) -> None:
+    url = blank if pair in ("url", "both", "url_only") else "https://example.supabase.co"
+    key = blank if pair in ("key", "both", "key_only") else "test-service-role-key"
+    if pair == "url_only":
+        key = None
+    elif pair == "key_only":
+        url = None
+
+    with pytest.raises(ValidationError, match="supabase"):
+        Settings(supabase_url=url, supabase_service_role_key=key)

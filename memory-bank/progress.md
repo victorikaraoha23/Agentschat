@@ -241,6 +241,18 @@
   no `.env` is ever read and defaults alone start the app. `python-dotenv` arrives transitively but is
   inert. Absent until a concrete need: CORS, database, auth, provider keys, logging, and any `.env.example`
   template (root `AGENTS.md` §5, §16, §21).
+- 2026-09-28: Supabase integration is a connectivity boundary only (Task 3.1): no auth, no tables,
+  no queries, no repositories. One official client library per side, nothing overlapping — backend
+  `supabase>=2,<3` (resolved 2.31.0, `create_client`), frontend `@supabase/supabase-js` exact `2.117.2`
+  (`createClient`); no ORM/migration/cache/queue/vector/storage abstraction was added. Backend settings
+  `AGENTSCHAT_API_SUPABASE_URL` + `AGENTSCHAT_API_SUPABASE_SERVICE_ROLE_KEY` accept both-or-neither (a
+  model validator rejects half-pairs naming the fields); the lifespan reads settings fresh per startup
+  (the module import-time instance predates test monkeypatching) and only verifies SDK construction — no
+  network call, and only the configured/unconfigured state is logged, never URL or key material. Frontend
+  module reads exactly two `NEXT_PUBLIC_*` vars (public URL + anon key) and returns `null` when either is
+  absent; the privileged key has no variable on the web side by construction. Both `.env.example` files
+  carry placeholders only. `get_supabase_client` builds a fresh client per call (no global/cache) so future
+  services choose their own lifecycle; no page imports the browser client yet.
 - 2026-09-25: backend logging is stdlib `logging` only, centralized in `app/logging_config.py`
   (`configure_logging` + `LOG_FORMAT`, shared `agentschat` logger; `basicConfig` so it composes with
   Uvicorn's handlers instead of replacing them). The level rides the existing Task 1.4 settings as

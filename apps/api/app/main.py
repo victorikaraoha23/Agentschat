@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from app.config import get_settings
 from app.logging_config import configure_logging, logger
+from app.supabase_client import get_supabase_client, is_supabase_configured
 
 settings = get_settings()
 
@@ -19,7 +20,15 @@ configure_logging(settings.log_level)
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Log process boundaries once per startup/shutdown — never per request."""
-    logger.info("AgentsChat API starting (environment=%s).", settings.environment)
+    current = get_settings()
+    logger.info("AgentsChat API starting (environment=%s).", current.environment)
+    if is_supabase_configured(current):
+        # Verify the SDK can build the client from settings; no network call.
+        # Only the configured/unconfigured state is logged — never the URL or key.
+        get_supabase_client(current)
+        logger.info("Supabase client initialized.")
+    else:
+        logger.info("Supabase is not configured; running without it.")
     yield
     logger.info("AgentsChat API shutting down.")
 

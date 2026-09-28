@@ -5,7 +5,8 @@ frontend of the product and, per the root `AGENTS.md`, communicates with the Age
 
 **Status: foundation only.** One page proves that the app builds, renders, and can call the API: it requests
 `GET /health` from the browser and reports whether the backend answered. There is no chat, authentication,
-or agent integration yet, and no other API call exists.
+or agent integration yet, no other API call exists, and the Supabase client below is created but not used
+by any page — connectivity only, no auth UI and no queries.
 
 ## Commands
 
@@ -23,20 +24,31 @@ Run from `apps/web/`:
 
 ## Configuration
 
-One optional, **client-visible** variable — never put a secret in it, because `NEXT_PUBLIC_*` values are
-compiled into the browser bundle (`apps/web/.env.example` documents it):
+Three optional, **client-visible** variables — never put a secret in any of them, because `NEXT_PUBLIC_*`
+values are compiled into the browser bundle (`apps/web/.env.example` documents them):
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `NEXT_PUBLIC_API_URL` | `http://127.0.0.1:8000` | Base URL of the AgentsChat API as seen from the browser |
+| `NEXT_PUBLIC_SUPABASE_URL` | *(unset)* | Supabase project URL (public identifier, browser-safe); when unset the client is unavailable |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | *(unset)* | Supabase anonymous/public key (browser-safe by design) — never a privileged key; when unset the client is unavailable |
 
-No `.env` file is needed: the default is the local API. The page reaches the API only through
+No `.env` file is needed: the defaults run locally without Supabase. The page reaches the API only through
 `app/health-api.ts`, which builds the request URL, applies a five-second deadline, checks the HTTP status,
 validates the response shape and returns a typed result. Failures are categorised so the UI can tell them
 apart: `network` (unreachable or timed out), `http` (non-success status, reported by status code only),
 `invalid-response` (malformed body or unexpected shape) and `unexpected` (anything else). The message shown
 to users is always this module's own text — never a raw server body, stack trace, or error object — and the
 function never throws, so a misbehaving API produces a visible failure state instead of crashing the page.
+
+## Supabase
+
+Connectivity boundary only: `lib/supabase-client.ts` (`getSupabaseClient` / `isSupabaseConfigured`) builds
+one shared browser client from the **public URL + anon key** — construction only, no network call, no auth
+flow, no query — and returns `null` when either variable is unset, so the app runs without Supabase. No
+page uses it yet; no login, signup, session, route guard, or profile exists. The backend's privileged key
+has no variable here and must never be added to one: any future `NEXT_PUBLIC_*` addition holding a secret
+is a defect.
 
 ## Note on npm workspaces
 
@@ -95,15 +107,19 @@ apps/web/
 │   ├── globals.css         # application-wide styles
 │   ├── health-api.ts       # calls GET /health and returns a typed result
 │   └── health-api.test.ts  # node:test coverage for that module
+├── lib/
+│   ├── supabase-client.ts       # browser Supabase client (public URL + anon key only)
+│   └── supabase-client.test.ts  # node:test coverage for that module
 ├── public/                 # static assets served at /
-├── .env.example            # documents NEXT_PUBLIC_API_URL (no secrets)
+├── .env.example            # documents NEXT_PUBLIC_* (public values only, no secrets)
 ├── vercel.json             # pins the install command for Vercel
 ├── AGENTS.md               # framework-generated Next.js agent rules; the root AGENTS.md governs
 └── package.json            # independent package: agentschat-web
 ```
 
-Directories are added when the code that needs them appears, not in advance. There is no `components/`,
-`lib/`, `hooks/`, `services/` or `features/` directory today because nothing belongs in them yet.
+Directories are added when the code that needs them appears, not in advance. `lib/` arrived with the
+Supabase browser client (its first shared module). There is no `components/`,
+`hooks/`, `services/` or `features/` directory today because nothing belongs in them yet.
 
 ## Conventions
 
@@ -121,10 +137,14 @@ Next.js conventions apply. These are the only project-specific rules on top of t
   `apps/web/components/`, as a kebab-case file exporting a PascalCase component (`copy-button.tsx` →
   `CopyButton`). A single-use component stays next to the page that uses it until it is genuinely shared.
 - **Shared utilities.** Framework-agnostic helpers used more than once go in `apps/web/lib/`. Nothing that
-  belongs to the API, the database, or a secret may end up in the browser bundle.
+  belongs to the API, the database, or a secret may end up in the browser bundle. The Supabase browser
+  client lives there because it will be shared; it carries only the public URL + anon key.
 - **Calling the API.** Browser requests go through a small colocated module (`app/health-api.ts`): the
   platform `fetch`, an HTTP-status check, response-shape validation, and a typed result instead of a thrown
   error. No HTTP library, and no abstraction layer for endpoints that do not exist yet.
+- **Supabase.** The browser client lives in `lib/supabase-client.ts` and uses only the public URL + anon
+  key (`getSupabaseClient` returns `null` when unconfigured). No auth UI, no session provider, no route
+  guard, no query — that belongs to later tasks.
 - **Imports.** Use the `@/*` alias (it maps to `apps/web/*`) for cross-folder imports and relative paths
   inside a folder: `import { CopyButton } from "@/components/copy-button";`.
 - **TypeScript.** `strict` stays enabled: no `any`, no unsafe casts, explicit prop types
