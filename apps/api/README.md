@@ -1,7 +1,8 @@
 # AgentsChat API
 
 The FastAPI backend/API for AgentsChat. **Foundation stage:** it starts locally and exposes a health
-check. It has no product functionality yet — no authentication, database, Supabase, Hermes
+check, plus a Supabase connectivity boundary (client creation only — no auth, no tables, no queries).
+It has no product functionality yet — no authentication, database models, Hermes
 integration, or business endpoints.
 
 ## Requirements
@@ -31,10 +32,13 @@ environment variables. Every setting has a safe default, so no `.env` file is re
 | `AGENTSCHAT_API_APP_NAME` | `AgentsChat API` | Application name; also the OpenAPI document title |
 | `AGENTSCHAT_API_ENVIRONMENT` | `local` | Environment label for local development |
 | `AGENTSCHAT_API_LOG_LEVEL` | `INFO` | Root log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`); unknown values fail validation |
+| `AGENTSCHAT_API_SUPABASE_URL` | *(unset)* | Supabase project URL for the backend client; set together with the key below, or neither |
+| `AGENTSCHAT_API_SUPABASE_SERVICE_ROLE_KEY` | *(unset)* | Privileged Supabase service-role key — **server-only**, never exposed to the browser; a URL without a key (or key without URL) fails validation |
 
 Invalid values (for example an empty string) fail validation when settings load, naming the offending
-field. This application has no secrets yet, so no `.env.example` exists; the first task that introduces
-a value which must be set per environment adds it (root `AGENTS.md` §16).
+field. Copy `.env.example` to `.env` only when real values exist — never commit the copy (`.env*` files
+are ignored). Without Supabase variables the backend reports unconfigured and runs without Supabase;
+see `## Supabase` below.
 
 ## CORS
 
@@ -82,6 +86,16 @@ Request logging is intentionally absent: Uvicorn's own access logs already cover
 them would only add noise. Nothing logs passwords, tokens, API keys, secrets, cookies, authorization
 headers, full request bodies, user private data, environment values, or database credentials.
 
+## Supabase
+
+Connectivity boundary only (no auth, no tables, no queries, no repositories). The backend owns one
+module, `app/supabase_client.py` (`get_supabase_client` / `is_supabase_configured` /
+`SupabaseNotConfiguredError`), built from the `AGENTSCHAT_API_SUPABASE_*` settings with the
+**service-role key** — never the browser anon key. On startup the lifespan verifies the SDK can build the
+client (construction only, no network call) and logs only `Supabase client initialized.` or
+`Supabase is not configured; running without it.` — never the URL or key. Without both variables the API
+runs exactly as before; `GET /health` is unaffected. No endpoint returns credentials.
+
 ## Structure
 
 ```text
@@ -90,13 +104,16 @@ apps/api/
 │   ├── __init__.py
 │   ├── config.py         # centralized settings (AGENTSCHAT_API_*)
 │   ├── logging_config.py # central logging setup (stdlib only, LOG_FORMAT)
+│   ├── supabase_client.py # backend Supabase boundary (service-role key, server-only)
 │   └── main.py           # FastAPI application + GET /health
 ├── tests/
 │   ├── test_config.py
 │   ├── test_cors.py
 │   ├── test_error_handling.py
 │   ├── test_health.py
-│   └── test_logging.py
+│   ├── test_logging.py
+│   └── test_supabase.py
+├── .env.example         # documents AGENTSCHAT_API_SUPABASE_* (placeholders only, committable)
 ├── pyproject.toml       # dependencies + pytest configuration
 └── uv.lock              # locked dependency versions
 ```

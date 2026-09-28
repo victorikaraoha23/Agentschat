@@ -1,7 +1,7 @@
 # Active Context
 
-- **Date:** 2026-09-25 (Task 2.3 session: logging foundation). Checkout branch `update`.
-- **Current task:** Task 2.3 (logging foundation) — implementation + verification complete; commit pending.
+- **Date:** 2026-09-28 (Task 3.1 session: Supabase integration). Checkout branch `update`.
+- **Current task:** Task 3.1 (Supabase integration) — implementation + verification complete; commit pending.
 - **What was done:**
   - **Task 0.1 (2026-09-22):** rewrote root `AGENTS.md` as the AgentsChat engineering constitution
     (mission, separation of concerns, dependency direction, simplicity, atomic dev, type safety, API,
@@ -69,6 +69,18 @@
     generic-500 handler (traceback server-side only; request path/headers/body never logged). No request
     logging added — Uvicorn access logs already cover it. Tests: `tests/test_logging.py` (configure/format,
     app start, lifespan boundaries) + extended config/error tests; README `## Logging` section.
+  - **Task 3.1 (2026-09-28):** Supabase integration boundary (no auth, no tables, no queries).
+    Backend: `supabase==2.31.0` added (`supabase>=2,<3`, uv.lock updated); `app/supabase_client.py`
+    (`get_supabase_client` / `is_supabase_configured` / `SupabaseNotConfiguredError`, service-role key,
+    construction-only, fresh client per call); `AGENTSCHAT_API_SUPABASE_URL` +
+    `AGENTSCHAT_API_SUPABASE_SERVICE_ROLE_KEY` settings (both-or-neither validator, `supabase_configured`
+    property); lifespan verifies construction and logs only configured/unconfigured state (never URL/key);
+    `apps/api/.env.example` added (placeholders only). Frontend: `@supabase/supabase-js==2.117.2` exact pin
+    (npm, 8 packages, 0 vulns); `lib/supabase-client.ts` (shared browser client, public URL + anon key only,
+    `null` when unconfigured, no logging); `lib/supabase-client.test.ts` + `supabase-client-unconfigured.test.ts`;
+    `test` script covers all three files; `apps/web/.env.example` gained the two public vars. Tests:
+    `tests/test_supabase.py` (7 tests: defaults, pair loading, half-pair rejection, clear missing error,
+    construction, unconfigured lifespan + /health). No page uses the browser client yet.
 - **Open questions / pending user input:**
   - The root `package.json` npm workspace glob (`apps/*`) still matches `apps/web`. Task 1.1 decided the app is
     an independent package (`npm install --workspaces=false`); narrowing the glob remains an explicitly scoped

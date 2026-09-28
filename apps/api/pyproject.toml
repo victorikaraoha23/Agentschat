@@ -9,6 +9,7 @@ dependencies = [
     # Pydantic arrives transitively through FastAPI; it is not declared here.
     "fastapi>=0.133,<1",
     "pydantic-settings>=2,<3",
+    "supabase>=2,<3",
     "uvicorn>=0.41,<1",
 ]
 
