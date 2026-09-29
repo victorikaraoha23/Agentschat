@@ -116,6 +116,7 @@ const SESSION_UNREADABLE_MESSAGE =
 const REJECTED_SIGNUP_MESSAGE =
   "Signup was rejected. Check the email address and password and try again.";
 const REJECTED_LOGIN_MESSAGE = "Email or password is incorrect.";
+const REJECTED_SIGNOUT_MESSAGE = "Sign out failed. Please try again.";
 const RATE_LIMITED_MESSAGE = "Too many attempts. Wait a moment and try again.";
 
 function resolveClient(client?: AuthClientLike): AuthClientLike | null {
@@ -278,7 +279,9 @@ export async function signOut(client?: AuthClientLike): Promise<SignOutResult> {
   try {
     const { error } = await auth.auth.signOut();
     if (error !== null) {
-      return { ok: false, ...classifyAuthError(error, "login") };
+      return error.status === 429
+        ? { ok: false, reason: "rate-limited", message: RATE_LIMITED_MESSAGE }
+        : { ok: false, reason: "rejected", message: REJECTED_SIGNOUT_MESSAGE };
     }
     return { ok: true };
   } catch {
