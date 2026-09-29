@@ -9,12 +9,13 @@ execution dependency and which is not itself user-visible.
 
 ## Current status
 
-**Foundational development stage: the web and API application skeletons exist; no product functionality does yet.**
+**Foundational development stage: the web application has signup/sign-in/sign-out, and the API recognizes authenticated Supabase users; no product functionality exists beyond that.**
 
 The repository contains the engineering constitution, the agent-runtime source that AgentsChat depends on,
-and the foundations of both applications (`apps/web`, a single static page; `apps/api`, one health-check
-endpoint). There is **no** database schema, authentication, chat interface, agent execution, or production
-deployment yet. Nothing described below as planned is implemented.
+and the foundations of both applications (`apps/web`: signup, sign-in, sign-out and session detection over
+Supabase Auth; `apps/api`: one health-check endpoint plus the authentication boundary, with no endpoint
+requiring authentication yet). There is **no** database schema, chat interface, agent execution, or
+production deployment yet. Nothing described below as planned is implemented.
 
 ## Planned architecture
 
@@ -59,11 +60,11 @@ Engineering standards, security requirements, testing expectations, and the Defi
 
 AgentsChat application code:
 
-- `apps/web/` — the Next.js web application. Its foundation exists (App Router, TypeScript strict mode, one
-  page that calls the API health check, and Vercel Web Analytics/Speed Insights wired in for the deployed
-  site); see [`apps/web/README.md`](./apps/web/README.md) for commands.
-- `apps/api/` — the FastAPI backend/API. Its foundation exists (`uv`-managed project, one `GET /health`
-  endpoint); see [`apps/api/README.md`](./apps/api/README.md) for commands.
+- `apps/web/` — the Next.js web application: signup, sign-in, sign-out and session detection over
+  Supabase Auth (`/signup`, `/login`, account status on the home page); see [`apps/web/README.md`](./apps/web/README.md) for commands.
+- `apps/api/` — the FastAPI backend/API: one `GET /health` endpoint plus the authentication boundary
+  (`AuthenticatedUser`, `require_authenticated_user`) that future protected endpoints will use; see
+  [`apps/api/README.md`](./apps/api/README.md) for commands.
 
 Each application is added by the task that builds it, together with its own tooling (Node/TypeScript for
 the web application, Python for the API). **No monorepo framework is used**, and the Python backend is not
@@ -95,10 +96,9 @@ Notes for the `apps/*` applications:
 
 ## Roadmap
 
-**Current stage — Stage 1: application foundation.** Stage 0 (governance, documentation, repository
-hygiene) is complete. Both application skeletons exist and are connected: the Next.js web application
-builds, renders, and calls the FastAPI `GET /health` endpoint from the browser, reporting success or failure
-honestly. No product functionality exists yet.
+**Current stage — Stage 1: application foundation.** Governance and the Supabase connectivity boundary
+are complete; the web application can create and use Supabase Auth sessions, and the API recognizes the
+authenticated identity on request but requires it nowhere yet. No product functionality exists yet.
 
 High-level upcoming stages:
 
@@ -114,9 +114,11 @@ not restate the build plan.
 
 ## Environment configuration
 
-`apps/web` has one **optional, client-visible** variable: `NEXT_PUBLIC_API_URL`, the base URL of the API as
-seen from the browser. It defaults to `http://127.0.0.1:8000`, so local development needs no setup;
-`apps/web/.env.example` documents it. Never place a secret in a `NEXT_PUBLIC_*` variable — those values are
+`apps/web` has two **optional, client-visible** variables: `NEXT_PUBLIC_API_URL`, the base URL of the API as
+seen from the browser, and the public Supabase pair (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`),
+which also powers Supabase Auth. They default to unset (the Supabase ones) or `http://127.0.0.1:8000`, so
+local development needs no setup and authentication simply reports itself unavailable;
+`apps/web/.env.example` documents them. Never place a secret in a `NEXT_PUBLIC_*` variable — those values are
 compiled into the client bundle (`AGENTS.md` §16).
 
 The API needs no configuration to start: every `AGENTSCHAT_API_*` setting has a safe default, documented in

@@ -253,6 +253,19 @@
   absent; the privileged key has no variable on the web side by construction. Both `.env.example` files
   carry placeholders only. `get_supabase_client` builds a fresh client per call (no global/cache) so future
   services choose their own lifecycle; no page imports the browser client yet.
+- 2026-09-29: Authentication Model over Supabase Auth (Task 3.2) — boundary only, no profiles,
+  no protected endpoints, no application data, no OAuth/password-reset/MFA. Frontend `lib/auth.ts` is the
+  only module that calls Supabase Auth (`signUpWithEmail`/`signInWithEmail`/`signOut`/`getCurrentSession`;
+  typed never-throwing results, fixed safe messages, provider text never surfaced; pending email
+  confirmation is reported, never faked as sign-in). Sessions are Supabase's own (`getSession()` over its
+  stored session; no custom tokens, no session context, no route guard). `/signup` + `/login` share
+  `components/auth-form.tsx`; the home page's `components/auth-status.tsx` shows the session and signs
+  out. Backend `app/auth.py` (`AuthenticatedUser`, `require_authenticated_user`, `SupabaseAccessTokenVerifier`
+  with a `client_factory` seam; rejected tokens → 401 with a challenge, unavailable Supabase → 503;
+  identity only from a verified token, body `user_id` distrusted; provider text neither returned nor logged).
+  Node's test runner needs the exact `.ts` specifier (`lib/auth.ts` → `./supabase-client.ts`, allowed by
+  `allowImportingTsExtensions`). Manual flow with real credentials was not run (no project was provisioned);
+  UI is minimal foundation, not final product design.
 - 2026-09-25: backend logging is stdlib `logging` only, centralized in `app/logging_config.py`
   (`configure_logging` + `LOG_FORMAT`, shared `agentschat` logger; `basicConfig` so it composes with
   Uvicorn's handlers instead of replacing them). The level rides the existing Task 1.4 settings as

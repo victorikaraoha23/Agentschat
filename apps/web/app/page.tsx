@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { AuthStatus } from "@/components/auth-status";
+
 import { checkApiHealth, type HealthCheckResult } from "./health-api";
 
 export default function Home() {
@@ -28,7 +30,7 @@ export default function Home() {
       </p>
       <p className="muted">
         This page is the foundation of the web application and exists to show that the Next.js app renders.
-        Chat, accounts, and agent execution are not implemented yet.
+        Chat and agent execution are not implemented yet; accounts are limited to signup, sign in, sign out.
       </p>
       <section aria-label="Integration status" aria-live="polite">
         <p className="status-line">
@@ -44,6 +46,10 @@ export default function Home() {
             <span className="status-error">failed — {health.message}</span>
           )}
         </p>
+      </section>
+      <section aria-label="Account status">
+        <h2>Account</h2>
+        <AuthStatus />
       </section>
     </main>
   );

@@ -1,7 +1,7 @@
 # Active Context
 
-- **Date:** 2026-09-28 (Task 3.1 session: Supabase integration). Checkout branch `update`.
-- **Current task:** Task 3.1 (Supabase integration) — implementation + verification complete; commit pending.
+- **Date:** 2026-09-29 (Task 3.2 session: Authentication Model). Checkout branch `update`.
+- **Current task:** Task 3.2 (Authentication Model) — implementation + verification complete; commit pending.
 - **What was done:**
   - **Task 0.1 (2026-09-22):** rewrote root `AGENTS.md` as the AgentsChat engineering constitution
     (mission, separation of concerns, dependency direction, simplicity, atomic dev, type safety, API,
@@ -69,7 +69,17 @@
     generic-500 handler (traceback server-side only; request path/headers/body never logged). No request
     logging added — Uvicorn access logs already cover it. Tests: `tests/test_logging.py` (configure/format,
     app start, lifespan boundaries) + extended config/error tests; README `## Logging` section.
-  - **Task 3.1 (2026-09-28):** Supabase integration boundary (no auth, no tables, no queries).
+  - **Task 3.2 (2026-09-29):** Authentication Model over Supabase Auth — no profiles, no protected
+    endpoints, no application data. Frontend: `lib/auth.ts` (only module touching Supabase Auth;
+    `signUpWithEmail`/`signInWithEmail`/`signOut`/`getCurrentSession`, typed never-throwing results, fixed
+    user-safe messages, pending-confirmation is not sign-in; session from Supabase storage, no token
+    handling); `/signup` + `/login` via shared `components/auth-form.tsx` (CSS module + globals base
+    controls); `components/auth-status.tsx` on the home page (state display + sign-out); 16 boundary tests
+    with a faked `AuthClientLike` seam, no live service. Backend: `app/auth.py` (`AuthenticatedUser`,
+    `require_authenticated_user` dependency (unused by endpoints yet), `SupabaseAccessTokenVerifier`
+    distinguishing rejected tokens (401) from unavailable Supabase (503), strict `Authorization: Bearer`
+    parsing; provider text never returned or logged, exception type only). 25 boundary tests incl. body
+    `user_id` distrust, token-absence in responses and logs, `/health` stays public, no-config startup.
     Backend: `supabase==2.31.0` added (`supabase>=2,<3`, uv.lock updated); `app/supabase_client.py`
     (`get_supabase_client` / `is_supabase_configured` / `SupabaseNotConfiguredError`, service-role key,
     construction-only, fresh client per call); `AGENTSCHAT_API_SUPABASE_URL` +
