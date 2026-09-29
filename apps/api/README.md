@@ -40,6 +40,15 @@ field. Copy `.env.example` to `.env` only when real values exist — never commi
 are ignored). Without Supabase variables the backend reports unconfigured and runs without Supabase;
 see `## Supabase` below.
 
+When using `.env`, fill in both Supabase values with non-whitespace values and start with:
+
+```powershell
+uv run uvicorn app.main:app --port 8000 --env-file .env
+```
+
+The `--env-file` option loads `.env` before the API reads its settings. Settings do not load that file
+automatically. To run without Supabase, omit both variables; empty or whitespace-only values are invalid.
+
 ## CORS
 
 The health check is called **from the browser**: the Next.js app runs on `http://localhost:3000` while
