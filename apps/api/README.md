@@ -96,17 +96,53 @@ client (construction only, no network call) and logs only `Supabase client initi
 `Supabase is not configured; running without it.` — never the URL or key. Without both variables the API
 runs exactly as before; `GET /health` is unaffected. No endpoint returns credentials.
 
+## Authentication
+
+The backend recognizes an authenticated Supabase user, but **no endpoint requires authentication yet** and
+no user profile or application data exists. `app/auth.py` owns the boundary:
+
+| Piece | Purpose |
+| --- | --- |
+| `AuthenticatedUser` | The identity (`user_id`, `email`) a protected request acts as |
+| `require_authenticated_user` | FastAPI dependency that resolves it, or fails closed |
+| `SupabaseAccessTokenVerifier` | Verifies a token with Supabase Auth via the server-side client |
+| `extract_access_token` | Strict `Authorization: Bearer <token>` parsing |
+
+Identity is derived **only** from a token that Supabase Auth has verified — a `user_id` in a request body,
+query string, or custom header is never accepted as proof of identity. To protect a future endpoint:
+
+```python
+@app.get("/example")
+def example(user: Annotated[AuthenticatedUser, Depends(require_authenticated_user)) -> ...:
+    ...
+```
+
+Failures are explicit and safe (Task 2.2 error shape, no provider text):
+
+| Case | Status | Body |
+| --- | --- | --- |
+| No `Authorization` header | `401` | `{"detail": "Authentication required."}` + `WWW-Authenticate: Bearer` |
+| Header is not a Bearer token | `401` | `{"detail": "The Authorization header must be a Bearer token."}` |
+| Token rejected (`invalid`, expired, unknown) | `401` | `{"detail": "Authentication credentials are invalid or expired."}` |
+| Supabase unconfigured or unreachable | `503` | `{"detail": "Authentication is temporarily unavailable."}` |
+
+Tokens are never logged, never returned, and never stored by the API. The access token and refresh token
+live only in the browser, where Supabase's own session handling keeps them; the API never receives a
+refresh token. `GET /health` stays public and Supabase-free.
+
 ## Structure
 
 ```text
 apps/api/
 ├── app/
 │   ├── __init__.py
+│   ├── auth.py           # authenticated-identity boundary (no endpoint requires it yet)
 │   ├── config.py         # centralized settings (AGENTSCHAT_API_*)
 │   ├── logging_config.py # central logging setup (stdlib only, LOG_FORMAT)
 │   ├── supabase_client.py # backend Supabase boundary (service-role key, server-only)
 │   └── main.py           # FastAPI application + GET /health
 ├── tests/
+│   ├── test_auth.py
 │   ├── test_config.py
 │   ├── test_cors.py
 │   ├── test_error_handling.py

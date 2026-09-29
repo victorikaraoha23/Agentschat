@@ -3,10 +3,10 @@
 The AgentsChat web application: Next.js (App Router), React, TypeScript in strict mode. It is the
 frontend of the product and, per the root `AGENTS.md`, communicates with the AgentsChat API only.
 
-**Status: foundation only.** One page proves that the app builds, renders, and can call the API: it requests
-`GET /health` from the browser and reports whether the backend answered. There is no chat, authentication,
-or agent integration yet, no other API call exists, and the Supabase client below is created but not used
-by any page — connectivity only, no auth UI and no queries.
+**Status: foundation only.** The app proves itself end to end: the home page requests `GET /health` from the
+browser and reports whether the backend answered, and `/signup` + `/login` create and use a Supabase Auth
+session (signup, sign in, sign out, session detection). There is still no chat, no agent integration, no
+user profile, no protected route, and no database query — accounts are authentication only.
 
 ## Commands
 
@@ -20,7 +20,7 @@ Run from `apps/web/`:
 | `npm run start` | Serve the production build |
 | `npm run lint` | ESLint (`eslint.config.mjs`, `eslint-config-next`) |
 | `npm run typecheck` | `next typegen && tsc --noEmit` |
-| `npm test` | Node's built-in test runner (`node --test`) for the API-request module |
+| `npm test` | Node's built-in test runner (`node --test`) for the API-request and auth modules |
 
 ## Configuration
 
@@ -43,12 +43,29 @@ function never throws, so a misbehaving API produces a visible failure state ins
 
 ## Supabase
 
-Connectivity boundary only: `lib/supabase-client.ts` (`getSupabaseClient` / `isSupabaseConfigured`) builds
-one shared browser client from the **public URL + anon key** — construction only, no network call, no auth
-flow, no query — and returns `null` when either variable is unset, so the app runs without Supabase. No
-page uses it yet; no login, signup, session, route guard, or profile exists. The backend's privileged key
-has no variable here and must never be added to one: any future `NEXT_PUBLIC_*` addition holding a secret
-is a defect.
+The browser client lives in `lib/supabase-client.ts` (`getSupabaseClient` / `isSupabaseConfigured`): one
+shared client built from the **public URL + anon key** — no privileged credential, no `NEXT_PUBLIC_*`
+variable that could leak one. It returns `null` when either variable is unset, so the app still runs and
+authentication simply reports itself unavailable.
+
+## Authentication
+
+Email/password signup, sign-in, sign-out, and session detection through Supabase Auth. No OAuth, no
+password reset, no email-verification screen, no profile, and no protected route.
+
+- `lib/auth.ts` is the only module that talks to Supabase Auth: `signUpWithEmail`, `signInWithEmail`,
+  `signOut`, `getCurrentSession`. Pages and components never touch the SDK or a token.
+- `/signup` and `/login` render `components/auth-form.tsx` (email, password, submit, inline
+  success/error state); the home page renders `components/auth-status.tsx`, which shows the session state
+  and signs out.
+- Sessions are Supabase's own: `getSession()` reads the session the SDK persists in the browser and
+  refreshes it. This app adds no token handling, no cookie, and no session store.
+- Every function returns a typed result with a fixed message of our own; provider error text never reaches
+  the UI. Signup that still needs email confirmation is reported as `confirmation-required` — not as a
+  signed-in user. `getCurrentSession` separates `unconfigured` and `error` from `unauthenticated`, so a
+  broken check never looks like "signed out".
+- None of this is authorization: the API has no protected endpoint yet, and the browser decides nothing
+  about what a user may do.
 
 ## Note on npm workspaces
 
@@ -103,11 +120,21 @@ belongs to the task that introduces user accounts and states the privacy require
 apps/web/
 ├── app/
 │   ├── layout.tsx          # root layout: metadata, styles, Vercel telemetry
-│   ├── page.tsx            # landing page: renders and reports the API health check
+│   ├── page.tsx            # landing page: API health check + account status
+│   ├── login/
+│   │   └── page.tsx        # sign-in page
+│   ├── signup/
+│   │   └── page.tsx        # account-creation page
 │   ├── globals.css         # application-wide styles
 │   ├── health-api.ts       # calls GET /health and returns a typed result
 │   └── health-api.test.ts  # node:test coverage for that module
+├── components/
+│   ├── auth-form.tsx            # shared email/password form (signup + login)
+│   ├── auth-form.module.css     # scoped styles for that form
+│   └── auth-status.tsx          # session state display and sign-out button
 ├── lib/
+│   ├── auth.ts                  # the only module that talks to Supabase Auth
+│   ├── auth.test.ts             # node:test coverage for that module
 │   ├── supabase-client.ts       # browser Supabase client (public URL + anon key only)
 │   └── supabase-client.test.ts  # node:test coverage for that module
 ├── public/                 # static assets served at /
@@ -118,8 +145,9 @@ apps/web/
 ```
 
 Directories are added when the code that needs them appears, not in advance. `lib/` arrived with the
-Supabase browser client (its first shared module). There is no `components/`,
-`hooks/`, `services/` or `features/` directory today because nothing belongs in them yet.
+Supabase browser client (its first shared module), and `components/` arrived with the shared
+authentication form. There is no `hooks/`, `services/` or `features/` directory today because nothing
+belongs in them yet.
 
 ## Conventions
 
@@ -143,10 +171,14 @@ Next.js conventions apply. These are the only project-specific rules on top of t
   platform `fetch`, an HTTP-status check, response-shape validation, and a typed result instead of a thrown
   error. No HTTP library, and no abstraction layer for endpoints that do not exist yet.
 - **Supabase.** The browser client lives in `lib/supabase-client.ts` and uses only the public URL + anon
-  key (`getSupabaseClient` returns `null` when unconfigured). No auth UI, no session provider, no route
-  guard, no query — that belongs to later tasks.
+  key (`getSupabaseClient` returns `null` when unconfigured). All Supabase Auth calls live in
+  `lib/auth.ts` and nowhere else: pages and components call its typed functions (which never throw and
+  never surface provider text) instead of the SDK. Supabase's own session storage is used — no token
+  handling, no session context, no route guard.
 - **Imports.** Use the `@/*` alias (it maps to `apps/web/*`) for cross-folder imports and relative paths
-  inside a folder: `import { CopyButton } from "@/components/copy-button";`.
+  inside a folder (`@/components/auth-form`, `./health-api`). One exception: `lib/auth.ts` imports
+  `./supabase-client.ts` with an explicit `.ts` extension, because Node's test runner resolves the exact
+  specifier while `tsconfig.json`'s `allowImportingTsExtensions` keeps the bundler happy.
 - **TypeScript.** `strict` stays enabled: no `any`, no unsafe casts, explicit prop types
   (root `AGENTS.md` §6).
 - **Naming.** Reserved Next.js files stay lowercase (`page.tsx`, `layout.tsx`); every other file is
