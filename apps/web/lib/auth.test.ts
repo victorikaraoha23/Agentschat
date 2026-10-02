@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  getAccessToken,
   getCurrentSession,
   signInWithEmail,
   signOut,
@@ -354,6 +355,44 @@ test("without Supabase configuration every operation fails clearly", async () =>
   );
   assert.deepEqual(await signOut(), expectedFailure);
   assert.deepEqual(await getCurrentSession(), { status: "unconfigured" });
+});
+
+test("the access token is available only for a live session", async () => {
+  const client: AuthClientLike = {
+    auth: {
+      async signUp() {
+        return authResult({});
+      },
+      async signInWithPassword() {
+        return authResult({});
+      },
+      async signOut() {
+        return { error: null };
+      },
+      async getSession() {
+        return {
+          data: {
+            session: { user: USER, access_token: "session-access-token" },
+          },
+          error: null,
+        };
+      },
+    },
+  };
+
+  assert.equal(await getAccessToken(client), "session-access-token");
+});
+
+test("no access token is returned without a usable session", async () => {
+  const signedOut = fakeClient({ session: { status: "absent" } }).client;
+  const unreadable = fakeClient({
+    session: { error: { message: "stale token" } },
+  }).client;
+
+  assert.equal(await getAccessToken(signedOut), null);
+  assert.equal(await getAccessToken(unreadable), null);
+  // No Supabase configuration in this process, so there is no session at all.
+  assert.equal(await getAccessToken(), null);
 });
 
 

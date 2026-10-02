@@ -139,17 +139,46 @@ Tokens are never logged, never returned, and never stored by the API. The access
 live only in the browser, where Supabase's own session handling keeps them; the API never receives a
 refresh token. `GET /health` stays public and Supabase-free.
 
+## User model (profiles)
+
+Supabase Auth remains the source of truth for authentication; `public.profiles` is the **application-level
+user record** — one row per Auth user, keyed by `id uuid primary key references auth.users (id)`, so a
+profile can never exist for an arbitrary UUID. The schema lives in
+[`supabase/migrations/0001_create_profiles.sql`](../../supabase/migrations/0001_create_profiles.sql)
+(versioned, safe to apply to a fresh project; see [`supabase/README.md`](../../supabase/README.md)).
+
+- **Creation:** an `after insert on auth.users` trigger creates the row exactly when the Auth identity
+  appears (`on conflict do nothing`, so it is idempotent and no duplicate can be created). The frontend
+  never creates profiles, and the API never inserts into `profiles`.
+- **RLS:** enabled with a single `select` policy scoped to `auth.uid() = id`. No `insert`, `update`, or
+  `delete` policy exists — the initial model has no user-editable fields, so no write permission is
+  granted at all.
+- **Reading:** `app/profiles.py` (`SupabaseProfileStore`, `load_user_profile`,
+  `ProfileRowNotFoundError`) resolves one row for the identity the Task 3.2 dependency already verified.
+
+`GET /me` is the single endpoint that proves the bridge: it requires a valid authenticated user
+(`require_authenticated_user`), resolves that user's profile, and returns
+`{user_id, created_at, updated_at}` — no tokens, passwords, credentials, or database internals. Identity
+never comes from the request body or query.
+
+| Case | Status | Body |
+| --- | --- | --- |
+| No / malformed / rejected token | `401` | (as in `## Authentication` above) |
+| Supabase unconfigured or unreachable | `503` | `{"detail": "Authentication is temporarily unavailable."}` |
+| Verified identity with no profile row | `500` | `{"detail": "The authenticated profile is unavailable."}` (a data-integrity signal, deliberately not a `404` callers could probe) |
+
 ## Structure
 
 ```text
 apps/api/
 ├── app/
 │   ├── __init__.py
-│   ├── auth.py           # authenticated-identity boundary (no endpoint requires it yet)
+│   ├── auth.py           # authenticated-identity boundary (verified token → user)
 │   ├── config.py         # centralized settings (AGENTSCHAT_API_*)
 │   ├── logging_config.py # central logging setup (stdlib only, LOG_FORMAT)
+│   ├── profiles.py       # profile store + lookup (verified identity → profile row)
 │   ├── supabase_client.py # backend Supabase boundary (service-role key, server-only)
-│   └── main.py           # FastAPI application + GET /health
+│   └── main.py           # FastAPI application + GET /health + GET /me
 ├── tests/
 │   ├── test_auth.py
 │   ├── test_config.py
@@ -157,6 +186,7 @@ apps/api/
 │   ├── test_error_handling.py
 │   ├── test_health.py
 │   ├── test_logging.py
+│   ├── test_profiles.py
 │   └── test_supabase.py
 ├── .env.example         # documents AGENTSCHAT_API_SUPABASE_* (placeholders only, committable)
 ├── pyproject.toml       # dependencies + pytest configuration

@@ -30,7 +30,8 @@ export default function Home() {
       </p>
       <p className="muted">
         This page is the foundation of the web application and exists to show that the Next.js app renders.
-        Chat and agent execution are not implemented yet; accounts are limited to signup, sign in, sign out.
+        Chat and agent execution are not implemented yet; accounts cover signup, sign in, sign out, and
+        resolving your AgentsChat profile.
       </p>
       <section aria-label="Integration status" aria-live="polite">
         <p className="status-line">

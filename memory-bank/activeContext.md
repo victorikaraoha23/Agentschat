@@ -1,7 +1,7 @@
 # Active Context
 
-- **Date:** 2026-09-29 (Task 3.2 session: Authentication Model). Checkout branch `update`.
-- **Current task:** Task 3.2 (Authentication Model) — implementation + verification complete; commit pending.
+- **Date:** 2026-10-02 (Task 3.3 session: User Model). Checkout branch `update`.
+- **Current task:** Task 3.3 (User Model) — implementation + verification complete; commit pending.
 - **What was done:**
   - **Task 0.1 (2026-09-22):** rewrote root `AGENTS.md` as the AgentsChat engineering constitution
     (mission, separation of concerns, dependency direction, simplicity, atomic dev, type safety, API,
@@ -69,6 +69,24 @@
     generic-500 handler (traceback server-side only; request path/headers/body never logged). No request
     logging added — Uvicorn access logs already cover it. Tests: `tests/test_logging.py` (configure/format,
     app start, lifespan boundaries) + extended config/error tests; README `## Logging` section.
+- **Task 3.3 (2026-10-02):** User Model — the identity bridge, no product data. New
+    `supabase/migrations/0001_create_profiles.sql` (`public.profiles`: `id uuid primary key references
+    auth.users (id) on delete cascade`, `created_at`/`updated_at` defaults; RLS enabled with one
+    `select` policy `auth.uid() = id` for `authenticated` and **no** insert/update/delete policy;
+    `after insert on auth.users` trigger creates the row idempotently via `security definer` +
+    `on conflict (id) do nothing`; `before update` trigger owns `updated_at`) plus `supabase/README.md`.
+    Backend: `app/profiles.py` (`UserProfile`, `ProfileRowLike`/`ProfileQueryLike`/`ProfileStore`
+    protocols, `SupabaseProfileStore` via the service-role client with a `client_factory` seam,
+    `load_user_profile`, `ProfileRowNotFoundError`); `GET /me` in `app/main.py` behind
+    `require_authenticated_user`, returning `{user_id, created_at, updated_at}` — 500 (not 404) when a
+    verified identity has no row, so profile existence cannot be probed. 11 new tests
+    (`tests/test_profiles.py`) asserting migration SQL structure, scoped store query, body-only profile
+    fields, unauthenticated 401, own-row-only resolution, and the no-leak 500. Frontend:
+    `lib/api-base-url.ts` (single read of `NEXT_PUBLIC_API_URL`; `app/health-api.ts` now re-exports it),
+    `lib/auth.ts` gained `getAccessToken` (token handed to one request, never stored/rendered),
+    `lib/profile-api.ts` (`fetchMyProfile`, injectable token + `fetch`, typed results, `unauthenticated`
+    distinct from `http`), `components/profile-status.tsx` mounted only for a signed-in session, 8 new
+    tests; `test` script covers the new file.
   - **Task 3.2 (2026-09-29):** Authentication Model over Supabase Auth — no profiles, no protected
     endpoints, no application data. Frontend: `lib/auth.ts` (only module touching Supabase Auth;
     `signUpWithEmail`/`signInWithEmail`/`signOut`/`getCurrentSession`, typed never-throwing results, fixed

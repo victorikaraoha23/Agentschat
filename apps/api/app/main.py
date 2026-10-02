@@ -2,14 +2,22 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Annotated
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from app.auth import AuthenticatedUser, require_authenticated_user
 from app.config import get_settings
 from app.logging_config import configure_logging, logger
+from app.profiles import (
+    ProfileRowNotFoundError,
+    SupabaseProfileStore,
+    UserProfile,
+    load_user_profile,
+)
 from app.supabase_client import get_supabase_client, is_supabase_configured
 
 settings = get_settings()
@@ -90,3 +98,25 @@ app.add_exception_handler(Exception, unhandled_exception_handler)
 def read_health() -> HealthResponse:
     """Report that the API process is up and serving requests."""
     return HealthResponse(status="healthy")
+
+
+@app.get("/me", response_model=UserProfile)
+def read_current_user_profile(
+    user: Annotated[AuthenticatedUser, Depends(require_authenticated_user)],
+) -> UserProfile:
+    """Return the AgentsChat profile for the verified caller — nothing else.
+
+    Identity comes from the Task 3.2 dependency, never from the request body:
+    a caller can only ever resolve their own row. The body carries the profile
+    fields only — no tokens, passwords, credentials, or database internals.
+    """
+    try:
+        return load_user_profile(user.user_id, SupabaseProfileStore(get_settings()))
+    except ProfileRowNotFoundError as exc:
+        # A verified identity with no row is a data-integrity signal (the
+        # trigger normally guarantees the row), so it is a 500, not a 404:
+        # 404 would let callers probe which identities have profiles.
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="The authenticated profile is unavailable.",
+        ) from exc
