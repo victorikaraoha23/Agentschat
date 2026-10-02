@@ -91,6 +91,7 @@ class SupabaseProfileStore:
         settings: Settings,
         client_factory: Callable[[Settings], ProfileClientLike] = get_supabase_client,
     ) -> None:
+        """Retain settings and a client factory for use when a lookup is requested."""
         self._settings = settings
         self._client_factory = client_factory
 

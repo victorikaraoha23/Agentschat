@@ -30,6 +30,7 @@ class FakeRow:
     """The `profiles` fields the module reads."""
 
     def __init__(self, id: str, created_at: datetime, updated_at: datetime) -> None:
+        """Build a row with explicit identity and timestamps for profile assertions."""
         self.id = id
         self.created_at = created_at
         self.updated_at = updated_at
@@ -39,10 +40,12 @@ class FakeStore:
     """Stand-in for the profile store."""
 
     def __init__(self, rows: dict[str, FakeRow]) -> None:
+        """Seed identity-keyed rows and start an empty lookup history."""
         self._rows = rows
         self.requested_ids: list[str] = []
 
     def get_by_id(self, user_id: str) -> FakeRow | None:
+        """Record the requested identity and return its seeded row, if present."""
         self.requested_ids.append(user_id)
         return self._rows.get(user_id)
 
@@ -51,6 +54,7 @@ class FakeResult:
     """What the executed query hands back."""
 
     def __init__(self, row: FakeRow | None) -> None:
+        """Expose a prepared row or missing result through the query's data field."""
         self.data = row
 
 
@@ -58,6 +62,7 @@ class FakeTableHandle:
     """The part of the table handle this test observes (columns, filters)."""
 
     def __init__(self) -> None:
+        """Initialize query observations used to assert column and identity scoping."""
         self.selected: tuple[str, ...] = ()
         self.filters: list[tuple[object, object]] = []
 
@@ -66,17 +71,21 @@ class FakeQuery:
     """Query chain: records the column filter, returns the prepared row."""
 
     def __init__(self, row: FakeRow | None, table: FakeTableHandle) -> None:
+        """Bind a prepared result to the table's shared query observations."""
         self._row = row
         self._table = table
 
     def eq(self, column: object, value: object):  # type: ignore[no-untyped-def]
+        """Record an equality filter without applying it to the prepared row."""
         self._table.filters.append((column, value))
         return self
 
     def maybe_single(self):  # type: ignore[no-untyped-def]
+        """Preserve chaining for a fake result already limited to zero or one row."""
         return self
 
     def execute(self) -> FakeResult:
+        """Return the prepared query result without contacting Supabase."""
         return FakeResult(self._row)
 
 
@@ -84,10 +93,12 @@ class FakeTable:
     """Stand-in for the `profiles` table handle."""
 
     def __init__(self, row: FakeRow | None) -> None:
+        """Prepare a table result and fresh observations for its query chain."""
         self._row = row
         self.observed = FakeTableHandle()
 
     def select(self, *columns: str):  # type: ignore[no-untyped-def]
+        """Record selected columns and start a query returning the prepared row."""
         self.observed.selected = columns
         return FakeQuery(self._row, self.observed)
 
@@ -96,10 +107,12 @@ class FakeClient:
     """Stand-in for the Supabase client."""
 
     def __init__(self, row: FakeRow | None) -> None:
+        """Seed a result for table requests and track the handles they create."""
         self._row = row
         self.tables: dict[str, FakeTable] = {}
 
     def table(self, name: str) -> FakeTable:
+        """Create and record a named table handle backed by the seeded result."""
         handle = FakeTable(self._row)
         self.tables[name] = handle
         return handle
@@ -119,9 +132,11 @@ class FakeVerifier:
     """Stand-in for the token verifier: accepts one bearer token."""
 
     def __init__(self, user_id: str) -> None:
+        """Choose the identity returned when the expected test token is verified."""
         self._user_id = user_id
 
     def verify(self, access_token: str) -> AuthenticatedUser:
+        """Assert the expected bearer token and return the configured test identity."""
         assert access_token == "header.payload.signature"
         return AuthenticatedUser(user_id=self._user_id, email="person@example.com")
 
