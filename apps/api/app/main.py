@@ -7,7 +7,9 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from httpx import HTTPError
 from pydantic import BaseModel
+from supabase import PostgrestAPIError, SupabaseException
 
 from app.auth import AuthenticatedUser, require_authenticated_user
 from app.config import get_settings
@@ -18,7 +20,11 @@ from app.profiles import (
     UserProfile,
     load_user_profile,
 )
-from app.supabase_client import get_supabase_client, is_supabase_configured
+from app.supabase_client import (
+    SupabaseNotConfiguredError,
+    get_supabase_client,
+    is_supabase_configured,
+)
 
 settings = get_settings()
 
@@ -119,4 +125,9 @@ def read_current_user_profile(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="The authenticated profile is unavailable.",
+        ) from exc
+    except (PostgrestAPIError, SupabaseException, SupabaseNotConfiguredError, HTTPError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication is temporarily unavailable.",
         ) from exc

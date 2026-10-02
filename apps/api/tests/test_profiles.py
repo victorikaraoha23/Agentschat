@@ -7,8 +7,10 @@ file in the repository, not from a remote schema.
 
 from datetime import datetime, timezone
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
+from supabase import PostgrestAPIError, SupabaseException
 
 from app.auth import AuthenticatedUser, get_access_token_verifier
 from app.main import app
@@ -19,6 +21,7 @@ from app.profiles import (
     load_user_profile,
     to_user_profile,
 )
+from app.supabase_client import SupabaseNotConfiguredError
 
 USER_ID = "123e4567-e89b-12d3-a456-426614174000"
 OTHER_USER_ID = "123e4567-e89b-12d3-a456-426614174999"
@@ -228,6 +231,80 @@ def test_supabase_store_queries_exactly_one_scoped_row() -> None:
     handle = client.tables["profiles"]
     assert handle.observed.selected == ("id", "created_at", "updated_at")
     assert handle.observed.filters == [("id", USER_ID)]
+
+
+@pytest.mark.parametrize("result", [None, FakeResult(None)])
+def test_supabase_store_accepts_missing_results(
+    result: FakeResult | None, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both an absent SDK response and absent row data mean no profile."""
+    monkeypatch.setattr(FakeQuery, "execute", lambda self: result)
+    store = SupabaseProfileStore(fake_settings(), client_factory=lambda _: FakeClient(None))
+
+    assert store.get_by_id(USER_ID) is None
+    with pytest.raises(ProfileRowNotFoundError):
+        load_user_profile(USER_ID, store)
+
+
+def test_me_reads_dictionary_row_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real SDK response carries JSON fields, including timestamp strings."""
+    from postgrest.base_request_builder import SingleAPIResponse
+    import app.main as main_module
+
+    result = SingleAPIResponse(data={
+        "id": USER_ID,
+        "created_at": CREATED.isoformat(),
+        "updated_at": UPDATED.isoformat(),
+    })
+    monkeypatch.setattr(FakeQuery, "execute", lambda self: result)
+    store = SupabaseProfileStore(fake_settings(), client_factory=lambda _: FakeClient(None))
+    monkeypatch.setitem(
+        app.dependency_overrides, get_access_token_verifier, lambda: FakeVerifier(USER_ID),
+    )
+    monkeypatch.setattr(main_module, "SupabaseProfileStore", lambda settings: store)
+
+    response = TestClient(app).get(
+        "/me", headers={"Authorization": "Bearer header.payload.signature"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "user_id": USER_ID,
+        "created_at": "2026-10-01T12:00:00Z",
+        "updated_at": "2026-10-02T12:00:00Z",
+    }
+
+
+@pytest.mark.parametrize("failure", [
+    PostgrestAPIError({"message": "private provider detail", "code": "XX000"}),
+    SupabaseException("private provider detail"),
+    SupabaseNotConfiguredError("private provider detail"),
+    httpx.ConnectError("private provider detail"),
+    httpx.ReadTimeout("private provider detail"),
+])
+def test_me_maps_profile_store_failures_to_503(
+    failure: Exception, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A store failure after authentication has a safe, documented response."""
+    import app.main as main_module
+
+    def fail_query(self: FakeQuery) -> FakeResult:
+        raise failure
+
+    monkeypatch.setattr(FakeQuery, "execute", fail_query)
+    store = SupabaseProfileStore(fake_settings(), client_factory=lambda _: FakeClient(None))
+    monkeypatch.setitem(
+        app.dependency_overrides, get_access_token_verifier, lambda: FakeVerifier(USER_ID),
+    )
+    monkeypatch.setattr(main_module, "SupabaseProfileStore", lambda settings: store)
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/me", headers={"Authorization": "Bearer header.payload.signature"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Authentication is temporarily unavailable."}
+    assert "private provider detail" not in caplog.text
 
 
 def test_to_user_profile_carries_only_profile_fields() -> None:
