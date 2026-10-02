@@ -122,7 +122,7 @@ query string, or custom header is never accepted as proof of identity. To protec
 
 ```python
 @app.get("/example")
-def example(user: Annotated[AuthenticatedUser, Depends(require_authenticated_user)) -> ...:
+def example(user: Annotated[AuthenticatedUser, Depends(require_authenticated_user)]) -> ...:
     ...
 ```
 
@@ -131,8 +131,8 @@ Failures are explicit and safe (Task 2.2 error shape, no provider text):
 | Case | Status | Body |
 | --- | --- | --- |
 | No `Authorization` header | `401` | `{"detail": "Authentication required."}` + `WWW-Authenticate: Bearer` |
-| Header is not a Bearer token | `401` | `{"detail": "The Authorization header must be a Bearer token."}` |
-| Token rejected (`invalid`, expired, unknown) | `401` | `{"detail": "Authentication credentials are invalid or expired."}` |
+| Header is not a Bearer token | `401` | `{"detail": "The Authorization header must be a Bearer token."}` + `WWW-Authenticate: Bearer` |
+| Token rejected (`invalid`, expired, unknown) | `401` | `{"detail": "Authentication credentials are invalid or expired."}` + `WWW-Authenticate: Bearer` |
 | Supabase unconfigured or unreachable | `503` | `{"detail": "Authentication is temporarily unavailable."}` |
 
 Tokens are never logged, never returned, and never stored by the API. The access token and refresh token

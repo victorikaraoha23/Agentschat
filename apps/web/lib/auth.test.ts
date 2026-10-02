@@ -265,14 +265,27 @@ test("signout ends the session and reports failure safely", async () => {
   assert.equal(calls.signOut, 1);
 
   const { client: failing } = fakeClient({
-    signOutError: { message: "Auth session missing!", status: 400 },
+    signOutError: {
+      message: "Auth session missing!",
+      status: 400,
+      code: "invalid_credentials",
+    },
   });
   const failure = await signOut(failing);
 
   assert.deepEqual(failure, {
     ok: false,
-    reason: "invalid-credentials",
-    message: "Email or password is incorrect.",
+    reason: "rejected",
+    message: "Sign out failed. Please try again.",
+  });
+
+  const { client: rateLimited } = fakeClient({
+    signOutError: { message: "Slow down", status: 429 },
+  });
+  assert.deepEqual(await signOut(rateLimited), {
+    ok: false,
+    reason: "rate-limited",
+    message: "Too many attempts. Wait a moment and try again.",
   });
 });
 
