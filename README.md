@@ -9,13 +9,15 @@ execution dependency and which is not itself user-visible.
 
 ## Current status
 
-**Foundational development stage: the web application has signup/sign-in/sign-out, and the API recognizes authenticated Supabase users; no product functionality exists beyond that.**
+**Foundational development stage: the web application has signup/sign-in/sign-out, and the API resolves authenticated users' AgentsChat profiles; no product functionality exists beyond that.**
 
 The repository contains the engineering constitution, the agent-runtime source that AgentsChat depends on,
-and the foundations of both applications (`apps/web`: signup, sign-in, sign-out and session detection over
-Supabase Auth; `apps/api`: one health-check endpoint plus the authentication boundary, with no endpoint
-requiring authentication yet). There is **no** database schema, chat interface, agent execution, or
-production deployment yet. Nothing described below as planned is implemented.
+and the foundations of both applications (`apps/web`: signup, sign-in, sign-out, session detection over
+Supabase Auth, and a one-line profile confirmation; `apps/api`: `GET /health`, the authentication boundary,
+and `GET /me`, which returns the signed-in user's profile). The first schema exists as a versioned
+Supabase migration (`supabase/migrations/`, a `profiles` table with Row Level Security). There is **no**
+chat interface, agent execution, or production deployment yet. Nothing described below as planned is
+implemented.
 
 ## Planned architecture
 
@@ -61,10 +63,13 @@ Engineering standards, security requirements, testing expectations, and the Defi
 AgentsChat application code:
 
 - `apps/web/` — the Next.js web application: signup, sign-in, sign-out and session detection over
-  Supabase Auth (`/signup`, `/login`, account status on the home page); see [`apps/web/README.md`](./apps/web/README.md) for commands.
-- `apps/api/` — the FastAPI backend/API: one `GET /health` endpoint plus the authentication boundary
-  (`AuthenticatedUser`, `require_authenticated_user`) that future protected endpoints will use; see
-  [`apps/api/README.md`](./apps/api/README.md) for commands.
+  Supabase Auth (`/signup`, `/login`, account status on the home page), plus the `GET /me` profile
+  confirmation; see [`apps/web/README.md`](./apps/web/README.md) for commands.
+- `apps/api/` — the FastAPI backend/API: `GET /health`, the authentication boundary
+  (`AuthenticatedUser`, `require_authenticated_user`), and `GET /me`, which resolves the signed-in user's
+  profile from `public.profiles`; see [`apps/api/README.md`](./apps/api/README.md) for commands.
+- `supabase/` — versioned SQL migrations for the application database (currently the `profiles` table and
+  its Row Level Security policies); see [`supabase/README.md`](./supabase/README.md).
 
 Each application is added by the task that builds it, together with its own tooling (Node/TypeScript for
 the web application, Python for the API). **No monorepo framework is used**, and the Python backend is not
@@ -96,9 +101,10 @@ Notes for the `apps/*` applications:
 
 ## Roadmap
 
-**Current stage — Stage 1: application foundation.** Governance and the Supabase connectivity boundary
-are complete; the web application can create and use Supabase Auth sessions, and the API recognizes the
-authenticated identity on request but requires it nowhere yet. No product functionality exists yet.
+**Current stage — Stage 1: application foundation.** Governance, the Supabase connectivity boundary, and
+the authentication model are complete: the web application creates and uses Supabase Auth sessions, the API
+resolves the authenticated identity and their `profiles` row behind `GET /me`, and the first schema ships
+as a versioned migration. No product functionality exists yet.
 
 High-level upcoming stages:
 

@@ -4,12 +4,14 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { getCurrentSession, signOut, type SessionState } from "@/lib/auth";
+import { ProfileStatus } from "@/components/profile-status";
 
 /**
  * Shows whether this browser has a session and lets a signed-in user sign out.
  *
  * Session state comes from `lib/auth.ts` (which reads the session Supabase
- * persists) — this component never touches the provider or a token.
+ * persists) — this component never touches the provider or a token. When a
+ * session exists, the profile confirmation below it runs once.
  */
 export function AuthStatus() {
   const [state, setState] = useState<SessionState | null>(null);
@@ -63,9 +65,12 @@ export function AuthStatus() {
         )}
       </p>
       {state !== null && state.status === "authenticated" && (
-        <button type="button" onClick={handleSignOut} disabled={signingOut}>
-          {signingOut ? "Signing out…" : "Sign out"}
-        </button>
+        <>
+          <ProfileStatus />
+          <button type="button" onClick={handleSignOut} disabled={signingOut}>
+            {signingOut ? "Signing out…" : "Sign out"}
+          </button>
+        </>
       )}
       {state !== null && state.status === "unauthenticated" && (
         <p className="muted">

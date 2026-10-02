@@ -7,12 +7,13 @@
  */
 
 /**
- * Where the browser finds the FastAPI backend. It is public by necessity —
- * `NEXT_PUBLIC_*` values are embedded in the client bundle — so this must
- * never hold a secret (root AGENTS.md §16).
+ * Where the browser finds the FastAPI backend. The value itself lives in
+ * `lib/api-base-url.ts` so every API module reads the environment once; it is
+ * re-exported here for the module that has always exposed it.
  */
-export const API_BASE_URL: string =
-  process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+import { API_BASE_URL } from "../lib/api-base-url.ts";
+
+export { API_BASE_URL };
 
 /** Expected body of GET /health. */
 export interface HealthResponse {

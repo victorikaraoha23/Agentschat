@@ -7,9 +7,10 @@
  *
  * Session handling is delegated entirely to Supabase: `getSession()` reads the
  * session the SDK persists and refreshes it on its own. This module never
- * reads, stores, or forwards an access token — it uses only the user id and
- * email of the session Supabase already manages. There is no custom token
- * system, no manual credential storage, and no session database.
+ * stores, caches, or renders an access token — it uses only the user id, the
+ * email, and (for a single authenticated API call) the token of the session
+ * Supabase already manages. There is no custom token system, no manual
+ * credential storage, and no session database.
  *
  * Nothing here throws: every failure is a typed result with a fixed,
  * user-safe message. Raw provider errors never reach the UI or a log, and no
@@ -43,7 +44,7 @@ export interface ClientAuthResultLike {
 
 /** The parts of Supabase's `getSession()` result this boundary uses. */
 export interface ClientSessionResultLike {
-  data: { session: { user: ClientUserLike } | null };
+  data: { session: { user: ClientUserLike; access_token?: string } | null };
   error: ClientAuthErrorLike | null;
 }
 
@@ -313,6 +314,35 @@ export async function getCurrentSession(
     };
   } catch {
     return { status: "error", message: SESSION_UNREADABLE_MESSAGE };
+  }
+}
+
+/**
+ * Return the session's access token for an authenticated API call, or `null`.
+ *
+ * The token is handed straight to the caller for the request being made — this
+ * module never stores, caches, logs, or renders it, and no component reads it
+ * directly. `null` means "no usable session" (unconfigured, signed out, or
+ * unreadable), which callers must treat the same way as an unauthenticated
+ * request.
+ */
+export async function getAccessToken(
+  client?: AuthClientLike,
+): Promise<string | null> {
+  const auth = resolveClient(client);
+  if (auth === null) {
+    return null;
+  }
+
+  try {
+    const { data, error } = await auth.auth.getSession();
+    if (error !== null || data.session === null) {
+      return null;
+    }
+    const token = data.session.access_token;
+    return typeof token === "string" && token.length > 0 ? token : null;
+  } catch {
+    return null;
   }
 }
 
