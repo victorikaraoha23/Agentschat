@@ -63,7 +63,7 @@ class ConversationInsertQueryLike(Protocol):
 
 
 class ConversationRowsResultLike(Protocol):
-    """What an executed rows read hands back: zero or more row mappings."""
+    """What an executed rows query hands back: zero or more row mappings."""
 
     data: list[dict[str, object]] | None
 
@@ -111,17 +111,19 @@ class ConversationWriteQueryLike(Protocol):
 
     An ``update`` or ``delete`` without a filter would apply to the whole table,
     so both endpoints filter on the id *and* the verified owner before the
-    statement runs, then select the conversation columns back. Zero matched
-    rows surfaces as "no row" through ``maybe_single`` — the same observation
-    the reads make for a conversation that does not exist or is not the
-    caller's.
+    statement runs, then select the conversation columns back. Matching zero
+    rows returns an empty list for a conversation that does not exist or is
+    not the caller's.
     """
 
     def eq(self, column: str, value: object) -> ConversationWriteQueryLike:
         """Filter the write to one column value."""
 
-    def select(self, *columns: str) -> ConversationSelectQueryLike:
-        """Choose the columns the write returns and continue the read chain."""
+    def select(self, *columns: str) -> ConversationWriteQueryLike:
+        """Choose the columns the write returns."""
+
+    def execute(self) -> ConversationRowsResultLike | None:
+        """Run the write against Supabase, returning the matched rows."""
 
 
 class ConversationTableLike(Protocol):
@@ -266,12 +268,11 @@ class SupabaseConversationStore:
             .eq("id", conversation_id)
             .eq("user_id", user_id)
             .select(*CONVERSATION_COLUMNS)
-            .maybe_single()
             .execute()
         )
-        if result is None or result.data is None:
+        if result is None or not result.data:
             return None
-        return Conversation.model_validate(result.data)
+        return Conversation.model_validate(result.data[0])
 
     def delete_for_user(self, user_id: str, conversation_id: str) -> bool:
         """Delete one row owned by ``user_id``; `False` when nothing matched.
@@ -287,7 +288,6 @@ class SupabaseConversationStore:
             .eq("id", conversation_id)
             .eq("user_id", user_id)
             .select(*CONVERSATION_COLUMNS)
-            .maybe_single()
             .execute()
         )
-        return result is not None and result.data is not None
+        return result is not None and bool(result.data)
