@@ -78,7 +78,9 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(DEV_ALLOWED_ORIGINS),
-    allow_methods=["GET", "POST"],
+    # PATCH and DELETE join GET/POST in Task 5.4 so the conversation detail
+    # endpoint is reachable cross-origin from the Next.js dev server.
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -129,6 +131,18 @@ class CreateConversationRequest(BaseModel):
     title: str | None = Field(default=None, max_length=MAX_CONVERSATION_TITLE_LENGTH)
 
 
+class UpdateConversationRequest(BaseModel):
+    """Body of PATCH /conversations/{conversation_id}: the new title, nothing else.
+
+    The same title type and length rule as creation — one rule set, not two.
+    The field is required (renaming without a title is not a request), `null`
+    clears the title exactly like a blank one does after normalization, and a
+    forged `user_id` is dropped the same way as on create.
+    """
+
+    title: str | None = Field(..., max_length=MAX_CONVERSATION_TITLE_LENGTH)
+
+
 class ConversationListResponse(BaseModel):
     """Body of GET /conversations: the caller's own conversations, named.
 
@@ -148,6 +162,11 @@ CONVERSATION_NOT_FOUND_DETAIL = "Conversation not found."
 #: erroring). Fixed text: no SQL, provider payload, or internal detail.
 CONVERSATION_LIST_UNAVAILABLE_DETAIL = "The conversations could not be read."
 CONVERSATION_UNAVAILABLE_DETAIL = "The conversation could not be read."
+
+#: Same standard for the write operations: fixed text when the write itself
+#: failed, never the reason behind it.
+CONVERSATION_UPDATE_UNAVAILABLE_DETAIL = "The conversation could not be updated."
+CONVERSATION_DELETE_UNAVAILABLE_DETAIL = "The conversation could not be deleted."
 
 
 def normalize_conversation_title(title: str | None) -> str | None:
@@ -238,6 +257,70 @@ def read_conversation(
             detail=CONVERSATION_NOT_FOUND_DETAIL,
         )
     return conversation
+
+
+@app.patch("/conversations/{conversation_id}", response_model=Conversation)
+def rename_conversation(
+    conversation_id: UUID,
+    body: UpdateConversationRequest,
+    user: Annotated[AuthenticatedUser, Depends(require_authenticated_user)],
+    store: Annotated[SupabaseConversationStore, Depends(get_conversation_store)],
+) -> Conversation:
+    """Change the title of one conversation the caller owns, or 404.
+
+    Only the title can change: the body has no other field, ownership stays
+    with the verified identity (the store filters on it together with the id),
+    and the database trigger — not this handler — refreshes `updated_at`. A
+    conversation belonging to someone else produces exactly the same 404 as
+    one that does not exist.
+    """
+    try:
+        conversation = store.rename_for_user(
+            user.user_id,
+            str(conversation_id),
+            normalize_conversation_title(body.title),
+        )
+    except (PostgrestAPIError, SupabaseException, SupabaseNotConfiguredError, HTTPError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=CONVERSATION_UPDATE_UNAVAILABLE_DETAIL,
+        ) from exc
+
+    if conversation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=CONVERSATION_NOT_FOUND_DETAIL,
+        )
+    return conversation
+
+
+@app.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_conversation(
+    conversation_id: UUID,
+    user: Annotated[AuthenticatedUser, Depends(require_authenticated_user)],
+    store: Annotated[SupabaseConversationStore, Depends(get_conversation_store)],
+) -> None:
+    """Delete one conversation the caller owns, or 404.
+
+    The same ownership rule as every other conversation operation: the store
+    filters on the verified identity together with the id, so a foreign id
+    matches nothing and answers the identical 404 — the caller can never learn
+    that someone else's conversation exists, let alone remove it. Success has
+    no body to send.
+    """
+    try:
+        deleted = store.delete_for_user(user.user_id, str(conversation_id))
+    except (PostgrestAPIError, SupabaseException, SupabaseNotConfiguredError, HTTPError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=CONVERSATION_DELETE_UNAVAILABLE_DETAIL,
+        ) from exc
+
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=CONVERSATION_NOT_FOUND_DETAIL,
+        )
 
 
 @app.get("/me", response_model=UserProfile)

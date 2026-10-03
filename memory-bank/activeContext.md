@@ -1,8 +1,8 @@
 # Active Context
 
-- **Date:** 2026-10-03 (Task 5.3 session: Conversation Retrieval). Checkout branch `update`.
-- **Current task:** Task 5.3 (Conversation Retrieval) — implement `GET /conversations` and
-  `GET /conversations/{conversation_id}`.
+- **Date:** 2026-10-03 (Task 5.4 session: Conversation Deletion & Renaming). Checkout branch `update`.
+- **Current task:** Task 5.4 (Conversation Deletion & Renaming) — implement
+  `PATCH /conversations/{conversation_id}` and `DELETE /conversations/{conversation_id}`.
 - **What was done:**
   - **Task 0.1 (2026-09-22):** rewrote root `AGENTS.md` as the AgentsChat engineering constitution
     (mission, separation of concerns, dependency direction, simplicity, atomic dev, type safety, API,
@@ -147,6 +147,26 @@
     now asserts `[GET, POST]` on `/conversations` and `[GET]` on the detail route with no
     `PATCH/PUT/DELETE`; `lib/conversations-api.test.ts` grew to 23 tests (16 new for list/read).
     Docs updated (root `README.md`, both app READMEs). No UI, mutation, message, or Hermes work.
+  - **Task 5.4 (2026-10-03):** conversation deletion & renaming — the initial conversation CRUD domain
+    is complete. Backend: `PATCH /conversations/{conversation_id}` (body `{"title": ...}` only; the same
+    title rules as creation — trimmed, blank/`null` clears to `NULL`, 200-char cap with `422`, forged
+    `user_id` dropped) returns the updated conversation with `200`; `DELETE /conversations/{conversation_id}`
+    answers `204 No Content`. Both require authentication and scope their statement in the query to the
+    verified `user_id` together with the id, so a foreign id matches nothing and answers the same
+    `404 {"detail": "Conversation not found."}` as a missing one — existence never leaks. `updated_at`
+    is refreshed by the migration's before-update trigger, never written by the application. Store
+    failures map to fixed `503` details (`The conversation could not be updated.` /
+    `The conversation could not be deleted.`); `app/conversations.py` gained `rename_for_user`,
+    `delete_for_user`, and the write Protocols; CORS `allow_methods` gained `PATCH`/`DELETE`. Frontend:
+    `lib/conversations-api.ts` gained `renameConversation` (returns the conversation) and
+    `deleteConversation` (`ConversationDeleteResult`: bare `{ ok: true }` on the 204), same
+    never-throwing typed results with fixed messages. Tests: new `tests/test_conversation_management.py`
+    (30 tests: auth, ownership isolation, validation, persistence, store-level owner-scoped
+    statements, safe 503/500 failures, and the full create → retrieve → rename → list → delete
+    lifecycle); the route-surface test now asserts `[DELETE, GET, PATCH]` on the detail route, no
+    `PUT`, and no modification verb on any other path; a CORS preflight test covers `PATCH`/`DELETE`;
+    `lib/conversations-api.test.ts` grew to 37 tests (14 new). Docs updated (root `README.md`, both app
+    READMEs). No messages, chat UI, agents, Hermes, streaming, or infrastructure.
 - **Open questions / pending user input:**
   - The root `package.json` npm workspace glob (`apps/*`) still matches `apps/web`. Task 1.1 decided the app is
     an independent package (`npm install --workspaces=false`); narrowing the glob remains an explicitly scoped

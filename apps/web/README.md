@@ -84,7 +84,7 @@ header (brand, navigation, sign-out) with the profile confirmation below.
 
 ## Conversations
 
-`lib/conversations-api.ts` (Tasks 5.2–5.3) is the typed, never-throwing boundary for the three
+`lib/conversations-api.ts` (Tasks 5.2–5.4) is the typed, never-throwing boundary for the five
 conversation requests, each sent with the session's bearer token — never a user id, because the API
 derives ownership from the token it verifies:
 
@@ -94,6 +94,10 @@ derives ownership from the token it verifies:
 - `getConversation` requests `GET /conversations/{conversation_id}` and answers `not-found` for a
   conversation that does not exist — or that belongs to someone else, because the API reports both
   exactly the same way and this module deliberately does not tell them apart.
+- `renameConversation` sends `PATCH /conversations/{conversation_id}` with `{title}` and returns the
+  updated conversation; an invalid id or title is `invalid-input`.
+- `deleteConversation` sends `DELETE /conversations/{conversation_id}` and answers a bare
+  `{ ok: true }` on success, because the API responds `204 No Content`.
 
 Results are typed (`unauthenticated` / `invalid-input` / `not-found` / `network` / `http` /
 `invalid-response` / `unexpected`) with fixed messages of our own; raw bodies never reach the UI.

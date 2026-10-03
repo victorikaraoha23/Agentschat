@@ -4,8 +4,8 @@ These tests assert the migration file in the repository (not a remote schema)
 plus the minimal backend domain type. RLS behavior itself cannot run here —
 there is no live Postgres — so it is verified by reading the policy text, the
 strongest deterministic check available without a database. The one exception
-is the route-surface check, which guards that Tasks 5.2–5.3 added conversation
-creation and retrieval and nothing beyond them.
+is the route-surface check, which guards that Tasks 5.2–5.4 added conversation
+creation, retrieval, renaming, and deletion — and nothing beyond them.
 """
 
 from pathlib import Path
@@ -143,8 +143,12 @@ def test_conversation_model_rejects_malformed_rows() -> None:
         )
 
 
-def test_conversation_surface_is_creation_and_retrieval_only() -> None:
-    """The collection is POST + GET, plus one GET by id — no other verb yet."""
+def test_conversation_surface_is_full_lifecycle_and_nothing_more() -> None:
+    """The collection is POST + GET; the detail path is GET/PATCH/DELETE.
+
+    Task 5.4 owns exactly the two verbs it was assigned — no PUT anywhere, no
+    modification verb on any other path, and still no chat/message routes.
+    """
     routes = {
         (route.path, method)
         for route in app.routes
@@ -157,15 +161,22 @@ def test_conversation_surface_is_creation_and_retrieval_only() -> None:
     assert ("/conversations", "POST") in routes
     assert ("/conversations", "GET") in routes
     assert ("/conversations/{conversation_id}", "GET") in routes
+    assert ("/conversations/{conversation_id}", "PATCH") in routes
+    assert ("/conversations/{conversation_id}", "DELETE") in routes
     assert sorted(method for path, method in routes if path == "/conversations") == [
         "GET",
         "POST",
     ]
-    assert [
+    assert sorted(
         method for path, method in routes if path == "/conversations/{conversation_id}"
-    ] == ["GET"]
-    # Task 5.4 owns modification and deletion; nothing may appear here early.
-    assert not {method for _, method in routes} & {"PATCH", "PUT", "DELETE"}
+    ) == ["DELETE", "GET", "PATCH"]
+    assert "PUT" not in {method for _, method in routes}
+    assert {
+        (path, method) for path, method in routes if method in {"PATCH", "DELETE"}
+    } == {
+        ("/conversations/{conversation_id}", "PATCH"),
+        ("/conversations/{conversation_id}", "DELETE"),
+    }
     assert not any(path.startswith("/chats") for path, _ in routes)
 
 
