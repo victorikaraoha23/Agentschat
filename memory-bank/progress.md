@@ -11,7 +11,8 @@
 - Verified `memory-bank/` directory listing via `Get-ChildItem` (creation observed).
 
 ## In progress
-- Awaiting user's next task. Task 1.5 is complete; Phase 2 (Task 2.1) is **not** started.
+- Nothing in flight. Task 6.1 (Conversation Page) is complete; Task 6.2 (persisting user messages) has
+  **not** started and must not start without an explicit instruction.
 
 ## Done (2026-09-22)
 - **Task 0.1 — engineering constitution** (commit `5026704a4e`): root `AGENTS.md` replaced with the
@@ -131,6 +132,79 @@
   `-WorkingDirectory`, so it ran from the repository root and never served; re-run with
   `-WorkingDirectory apps/api` and it worked. The same applies to any future scripted server start.
 
+## Done (2026-09-25 … 2026-10-03, backfilled on 2026-10-03)
+- These entries were missing from this file's dated sections (they existed only in git history and the app
+  READMEs); they are recorded here so the bank is accurate to the checkout. Commits are the source.
+- **Task 2.3 (`39dacdf517`) — logging foundation, backend only.** stdlib logging with root log levels and
+  existing handlers; exception types and non-sensitive metadata are logged, never message bodies, tokens,
+  or provider payloads. The frontend was deliberately left unchanged.
+- **Task 3.1 (`c614563c3c`) — Supabase connectivity boundary.** Backend settings take both-or-neither
+  (`AGENTSCHAT_API_SUPABASE_URL` + `AGENTSCHAT_API_SUPABASE_SERVICE_ROLE_KEY`; a validator rejects
+  half-pairs and names the fields); startup verifies SDK construction without a network call. Frontend
+  `lib/supabase-client.ts` reads exactly two public `NEXT_PUBLIC_*` values and returns `null` when either
+  is absent, so the privileged key has no variable on the web side by construction. No auth, tables, or
+  queries.
+- **Task 3.2 (`1e80b66780`, fixes `d018e20afd`, `7ff17d1f6c`) — authentication model.** `lib/auth.ts` is the
+  only module that talks to Supabase Auth (typed, never throwing, fixed messages); `/signup` + `/login`
+  share `components/auth-form.tsx`. Backend `app/auth.py` verifies Supabase access tokens
+  (`require_authenticated_user`, `client_factory` seam): rejected tokens are 401 with a challenge,
+  unavailable Supabase is 503, identity comes only from the verified token, and provider text is neither
+  returned nor logged.
+- **Task 3.3 (`318fdf9f0f`, fixes `86d5da73af`, `96b1648326`) — user model.** The `profiles` table
+  (migration `0001`) plus `GET /me`, which resolves the signed-in user's profile from the verified token;
+  profile store failures are a fixed `503` and malformed provider rows are parsed defensively.
+- **Task 4.1 (`34b57e8d2c`, docs `0c1b66b8b4`, `504ed4b200`) — authenticated application shell.** `/app`
+  renders `components/app-shell.tsx`, gated by the pure `lib/shell-access.ts` (`toShellAccess`, `SHELL_NAV`)
+  over the existing session: loading → denial or header, with `components/profile-status.tsx` confirming
+  `GET /me`. No second authentication system, no route-guard framework.
+- **Task 4.2 (`bcdb956244`) — minimal design foundation.** `app/globals.css` gained semantic tokens
+  (light/dark), element styles, `.surface` / `.shell-nav` / `.app-shell*`, visible `:focus-visible`, and
+  `prefers-reduced-motion` handling. No framework, no component library, no dark-mode toggle.
+- **Task 5.1 (`bf6ce941c6`) — conversation schema.** `supabase/migrations/0002_create_conversations.sql`:
+  `conversations` with `user_id` → `profiles (id)` (cascade), nullable `title`, `updated_at` maintained by
+  a before-update trigger, an index on `user_id`, RLS enabled, and four owner-scoped policies on
+  `auth.uid() = user_id` whose `with check` rejects a forged `user_id`.
+- **Task 5.2 (`cb82139180`) — conversation creation.** `POST /conversations` with an optional title (trimmed;
+  blank/`null` stored as `NULL`; over 200 characters is `422`); a forged body `user_id` is dropped by the
+  request model and the row is inserted with the verified `user_id`.
+- **Task 5.3 (`b42ba04c4e`) — conversation retrieval.** `GET /conversations` and
+  `GET /conversations/{conversation_id}`, both owner-scoped in the same statement, so a foreign id matches
+  nothing and answers the same `404 {"detail": "Conversation not found."}` as a missing one.
+- **Task 5.4 (`1c6d239e48`) — conversation renaming and deletion.** `PATCH /conversations/{conversation_id}`
+  (same title rules as creation, `200` with the updated conversation) and
+  `DELETE /conversations/{conversation_id}` (`204 No Content`). `updated_at` is refreshed only by the
+  database trigger; store failures map to fixed `503` details; CORS allows `PATCH`/`DELETE`. The frontend
+  gained `renameConversation` and `deleteConversation` with typed, never-throwing results.
+
+## Done (2026-10-03)
+- **Task 6.1 — conversation page.** First Phase 6 task and the first chat UI: the route
+  `/app/conversations/[conversationId]` renders one conversation the signed-in user owns — header, empty
+  message area, composer — and **sends nothing**.
+  - Route: `page.tsx` is a **server** component awaiting `params`
+    (`PageProps<"/app/conversations/[conversationId]">`); the client `conversation-page.tsx` receives only
+    `conversationId`. Access reuses the existing session boundary (`getCurrentSession` +
+    `toShellAccess`), so there is no second authentication system and no private content renders before a
+    session is granted. Ownership is decided by the API from the bearer token — never from the URL or
+    from client state.
+  - Logic lives in two pure modules with their own tests, mirroring `lib/shell-access.ts`:
+    `lib/conversation-view.ts` (`toConversationPageView`, `conversationTitle`, `UNTITLED_CONVERSATION`)
+    maps session + typed result to one view — `loading` / `denied` / `not-found` / `error` / `ready` — and
+    collapses `not-found` + `invalid-input` so a missing, foreign, or malformed conversation stays
+    indistinguishable; `lib/conversation-composer.ts` holds the composer rules, where a submit shows a
+    "messages are not sent yet" status notice and **keeps** the draft because nothing was delivered.
+  - Components are colocated with the route (`conversation-header.tsx`, `conversation-empty-state.tsx`,
+    `chat-composer.tsx`) with page-scoped `conversation.module.css`: one column, tokens and `.surface`
+    reused from `app/globals.css`, Send stacked under the field below `30rem`. No device detection, no
+    skeleton infrastructure, no state library, no new dependency, no second API client.
+  - Verified: `npm test` → **105 passed / 0 failed** (25 new — 17 view, 8 composer; the 80 existing tests,
+    including auth, shell access, and every conversation API test, still pass); `npm run typecheck`
+    (`next typegen && tsc --noEmit`) exit 0 with `/app/conversations/[conversationId]` present in the
+    generated route types; `npm run lint` exit 0; `npm run build` exit 0 with the route built as dynamic;
+    `uv run pytest -q` in `apps/api` → **174 passed** (no backend change). Secret scan clean.
+  - Deliberately not implemented, by task scope: message persistence (`messages` table, endpoints, service,
+    repository), assistant responses, streaming, agent execution, Hermes integration, rename/delete UI,
+    conversation list/sidebar, search, filters, sorting, folders, and any caching or extra dependency.
+
 ## Backlog / reminders
 - Keep bank in sync when architecture or workflows change (point to `AGENTS.md`/code, don't duplicate).
 - Suggested update ritual: after each task, append decisions + verification under a dated heading here and refresh `activeContext.md`.
@@ -164,6 +238,30 @@
   `.vercel/` stays ignored; diff limited to five intended files.
 
 ## Decision log
+- 2026-10-03: The conversation route is a **server** component that awaits `params` and passes only
+  `conversationId` to a client page body. The client boundary exists because the session and the API call
+  both live in the browser (the web → API boundary is browser-side `fetch`, decided in Task 1.5), and
+  `"use client"` stays on the smallest component that needs it, per the app README's server-first rule.
+- 2026-10-03: The page composes the **existing** session boundary (`getCurrentSession` + `toShellAccess`)
+  instead of introducing a route guard, a middleware, or a second auth check — the same decision the
+  application shell makes, so "signed in" means one thing in the product.
+- 2026-10-03: Page state is a **pure mapping** in `lib/conversation-view.ts`, and composer rules are pure
+  functions in `lib/conversation-composer.ts`, each with its own `node --test` file. This follows the
+  `shell-access.ts` precedent and keeps the page testable without a browser; no DOM test framework,
+  jsdom, or component-testing dependency was added for one page.
+- 2026-10-03: An API-`unauthenticated` failure maps to the same "sign in again" denial as a session
+  denial, and `not-found` + `invalid-input` collapse into one not-found view. Both choices keep existence
+  hidden and avoid a retry loop that cannot succeed.
+- 2026-10-03: Submitting the composer shows a notice and **keeps** the draft. Clearing the input would
+  report a delivery that never happened (`AGENTS.md` §13: preserve "we did not do it" vs "it may have
+  happened"), so the composer is honest instead of reassuring. A disabled-forever button was rejected as
+  less informative than a real, visibly non-persisting submit.
+- 2026-10-03: The loaded conversation is tagged with its id and attempt before it is stored, so moving
+  between conversations or retrying can never show the previous conversation's title — a race that a bare
+  `result` state would introduce once routes are linked.
+- 2026-10-03: Conversation UI is page-scoped: one CSS module colocated with the route, reusing the
+  existing tokens from `app/globals.css`. No component library, no design-system extension, no
+  breakpoint state — one media query stacks the Send button under the field on narrow screens.
 - 2026-09-21: Used standard Cline six-file bank (projectbrief/productContext/systemPatterns/techContext/activeContext/progress) since repo-wide search timed out and no existing bank was visible at root listing. Content grounded in `AGENTS.md` + area guides + `README` + `pyproject`, not invented.
 - 2026-09-22: AgentsChat application code will live in `apps/web` (Next.js/TypeScript) and `apps/api`
   (Python/FastAPI) as two independent projects; no monorepo framework, and the Python backend is not placed

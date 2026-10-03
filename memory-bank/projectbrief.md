@@ -1,3 +1,17 @@
+# Project Brief — AgentsChat (agentschat checkout)
+
+## AgentsChat (the product being built here)
+- **What:** a hosted, beginner-friendly AI-agent workspace: sign in, describe the work in plain language,
+  the hosted system does it and returns the result.
+- **Layers:** `apps/web` (Next.js) → `apps/api` (FastAPI) → `supabase/` (auth + data, RLS-enforced).
+  Hermes (this checkout's runtime source) is an execution dependency the product has not yet wired up.
+- **Constitution:** the root `AGENTS.md` governs all AgentsChat code; Hermes areas keep their own guides
+  (Appendix A). The runtime must never absorb product concerns (accounts, tenancy, authorization).
+- **Stage (2026-10-03):** auth + profiles + full conversation CRUD (API, RLS, typed browser client) and
+  the conversation page shell are done. Message persistence, agent execution, and the Hermes adapter do
+  not exist yet. Work is atomic and sequential: one task per session, never more.
+- **Current state:** see `memory-bank/activeContext.md`; history in `memory-bank/progress.md`.
+
 # Project Brief — Hermes Agent (agentschat checkout)
 
 - **What:** Personal self-improving AI agent (Nous Research). Same agent core across CLI, messaging gateway (~20 platforms), TUI, Electron desktop app.

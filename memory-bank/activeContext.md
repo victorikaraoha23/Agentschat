@@ -1,8 +1,8 @@
 # Active Context
 
-- **Date:** 2026-10-03 (Task 5.4 session: Conversation Deletion & Renaming). Checkout branch `update`.
-- **Current task:** Task 5.4 (Conversation Deletion & Renaming) — implement
-  `PATCH /conversations/{conversation_id}` and `DELETE /conversations/{conversation_id}`.
+- **Date:** 2026-10-03 (Task 6.1 session: Conversation Page — Phase 6 has started). Checkout branch `update`.
+- **Current task:** Task 6.1 (Conversation Page) is **complete**. The next task, 6.2 (persisting user
+  messages), must not begin without an explicit instruction.
 - **What was done:**
   - **Task 0.1 (2026-09-22):** rewrote root `AGENTS.md` as the AgentsChat engineering constitution
     (mission, separation of concerns, dependency direction, simplicity, atomic dev, type safety, API,
@@ -167,6 +167,52 @@
     `PUT`, and no modification verb on any other path; a CORS preflight test covers `PATCH`/`DELETE`;
     `lib/conversations-api.test.ts` grew to 37 tests (14 new). Docs updated (root `README.md`, both app
     READMEs). No messages, chat UI, agents, Hermes, streaming, or infrastructure.
+  - **Task 6.1 (2026-10-03):** conversation page — Phase 6 begins, and the first chat UI. The route
+    `/app/conversations/[conversationId]` lives in the authenticated `(app)` group; its `page.tsx` is a
+    **server** component that awaits `params` (Next 16 `PageProps<"/app/conversations/[conversationId]">`,
+    typed-route verified in `.next/types/routes.d.ts`) and passes **only** `conversationId` to the client
+    `conversation-page.tsx`. No second authentication system: access is the existing session from
+    `lib/auth.ts` mapped through `toShellAccess`, so no private content renders before a session is
+    granted, and nothing about ownership comes from the URL or client state — `getConversation` carries
+    the bearer token and the API decides. Two new **pure** lib modules carry the logic, mirroring
+    `lib/shell-access.ts`: `lib/conversation-view.ts` (`toConversationPageView`, `conversationTitle`,
+    `UNTITLED_CONVERSATION`) maps session + typed result to exactly one view — `loading` | `denied`
+    (session denials plus `rejected` for a refused token) | `not-found` | `error` (recoverable, fixed
+    message, **Try again**) | `ready`; `not-found` and `invalid-input` collapse to one not-found view, so
+    a foreign conversation, a missing one, and a malformed id stay indistinguishable; and
+    `lib/conversation-composer.ts` holds the composer rules — send enabled only for a non-whitespace
+    draft, submit shows `COMPOSER_NOTICE_MESSAGE` ("messages are not sent yet") in a `role="status"`
+    region and **keeps** the draft, because nothing was delivered (no fake request, no fake reply).
+    Components are colocated with the route (`conversation-header.tsx`, `conversation-empty-state.tsx`,
+    `chat-composer.tsx`) plus page-scoped `conversation.module.css`; tokens/`.surface`/focus-visible come
+    from `app/globals.css`, layout is one column that stacks the Send button under the field below
+    `30rem` — no device detection, no skeleton infrastructure, no state library. The loaded result is
+    tagged with its id and attempt, so navigating between conversations or retrying never shows the
+    previous answer. Tests: 25 new (`lib/conversation-view.test.ts` 17, `lib/conversation-composer.test.ts`
+    8) → `npm test` **105 passed**; `next typegen && tsc --noEmit` exit 0; `eslint` exit 0; `next build`
+    exit 0 with `/app/conversations/[conversationId]` as a dynamic route; `uv run pytest -q` unchanged at
+    174 passed. Docs updated (root `README.md`, `apps/web/README.md`). Deliberately **not** implemented:
+    message persistence/API/table, assistant responses, streaming, agents, Hermes, rename/delete UI,
+    conversation sidebar, search, sorting, folders, skeletons, caching, or any dependency.
+  - **Backfilled 2026-10-03** (these tasks were completed earlier but were missing from this list):
+    - **Task 3.1 (2026-09-22, commit `c614563c3c`)** Supabase **connectivity boundary only** — backend
+      `AGENTSCHAT_API_SUPABASE_URL` + `..._SERVICE_ROLE_KEY` settings that accept both-or-neither (a
+      validator rejects half-pairs, naming the fields) and verify SDK construction at startup without a
+      network call; frontend `lib/supabase-client.ts` reads exactly the two public `NEXT_PUBLIC_*` values
+      and returns `null` when either is absent. No auth, tables, queries, or repositories.
+    - **Task 4.1 (2026-10-03, commit `34b57e8d2c`)** authenticated application shell at `/app` —
+      `components/app-shell.tsx` gates on `lib/shell-access.ts` (`toShellAccess`, `SHELL_NAV`) over the
+      existing session, showing loading, then denial or the header, and `components/profile-status.tsx`
+      confirms `GET /me`.
+    - **Task 4.2 (2026-10-03, commit `bcdb956244`)** minimal design foundation in `app/globals.css` —
+      semantic tokens (light/dark), element styles, `.surface` / `.shell-nav` / `.app-shell*`, visible
+      `:focus-visible`, and `prefers-reduced-motion` handling. No framework or component library.
+    - **Task 5.1 (2026-10-03, commit `bf6ce941c6`)** conversation schema — `supabase/migrations/
+      0002_create_conversations.sql`: `conversations` (`id` uuid default `gen_random_uuid()`, `user_id`
+      → `public.profiles (id)` on delete cascade, nullable `title`, `created_at`/`updated_at`, an index
+      on `user_id`, and a `before update` trigger `handle_conversations_updated_at`) with RLS enabled and
+      four owner-scoped policies on `auth.uid() = user_id`; the insert policy's `with check` rejects a
+      client-supplied `user_id`, so the policies fail closed.
 - **Open questions / pending user input:**
   - The root `package.json` npm workspace glob (`apps/*`) still matches `apps/web`. Task 1.1 decided the app is
     an independent package (`npm install --workspaces=false`); narrowing the glob remains an explicitly scoped
@@ -175,9 +221,14 @@
     Hermes README), and should `apps/desktop/README.md`'s `../../README.md` link follow it?
 - **Next steps:**
   - Start the next task only on explicit instruction; read the root `AGENTS.md`, `apps/api/README.md`, and
-    `apps/web/README.md` first.
-  - `memory-bank/` notes are behind: Tasks 3.3, 4.1, 4.2 and 5.1 are recorded in git history and the app
-    READMEs but not in the "What was done" list here.
+    `apps/web/README.md` first. Task 6.2 (persisting user messages) is the next planned task and has
+    **not** been started.
+  - Phase 6 so far is frontend-only: no message table, message endpoint, message service, or repository
+    exists anywhere in the repository, and no Hermes adapter exists either.
+  - `memory-bank/` was brought up to date on 2026-10-03: the previously missing task entries (3.1, 4.1, 4.2,
+    5.1) were backfilled here and in `progress.md`, and the four Hermes-oriented files
+    (`projectbrief.md`, `productContext.md`, `systemPatterns.md`, `techContext.md`) now carry an
+    AgentsChat section instead of describing the runtime only.
   - On code changes: `scripts/run_tests.sh` for Hermes source; keep prompt-caching and profile-scope
     invariants.
 - **Key files for orientation:** `AGENTS.md` → `README.md` → `docs/hermes-runtime.md` → `memory-bank/*`;

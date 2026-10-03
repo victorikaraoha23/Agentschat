@@ -9,17 +9,18 @@ execution dependency and which is not itself user-visible.
 
 ## Current status
 
-**Foundational development stage: the web application has signup/sign-in/sign-out, the API resolves authenticated users' AgentsChat profiles and lets a signed-in user create, list, read, rename, and delete conversations they own; no chat interface or agent execution exists beyond that.**
+**Foundational development stage: the web application has signup/sign-in/sign-out, the API resolves authenticated users' AgentsChat profiles and lets a signed-in user create, list, read, rename, and delete conversations they own, and the conversation page at `/app/conversations/{conversation_id}` opens one such conversation — its title, an empty message area, and a composer that does not yet send anything. No message is persisted, and no agent execution exists.**
 
 The repository contains the engineering constitution, the agent-runtime source that AgentsChat depends on,
 and the foundations of both applications (`apps/web`: signup, sign-in, sign-out, session detection over
-Supabase Auth, and a one-line profile confirmation; `apps/api`: `GET /health`, the authentication boundary,
+Supabase Auth, a one-line profile confirmation, and the conversation page shell; `apps/api`:
+`GET /health`, the authentication boundary,
 `GET /me`, which returns the signed-in user's profile, and the conversation endpoints —
 `POST /conversations`, `GET /conversations`, `GET /conversations/{conversation_id}`,
 `PATCH /conversations/{conversation_id}`, and `DELETE /conversations/{conversation_id}` — which create,
 read, rename, and delete conversations owned by the signed-in user). The schema exists as versioned Supabase migrations
 (`supabase/migrations/`: a `profiles` table and a `conversations` table, each with Row Level Security).
-There is **no** chat interface, agent execution, or production deployment yet. Nothing described below as
+There is **no** messaging, agent execution, or production deployment yet. Nothing described below as
 planned is implemented.
 
 ## Planned architecture
@@ -66,8 +67,9 @@ Engineering standards, security requirements, testing expectations, and the Defi
 AgentsChat application code:
 
 - `apps/web/` — the Next.js web application: signup, sign-in, sign-out and session detection over
-  Supabase Auth (`/signup`, `/login`, account status on the home page), plus the `GET /me` profile
-  confirmation; see [`apps/web/README.md`](./apps/web/README.md) for commands.
+  Supabase Auth (`/signup`, `/login`, account status on the home page), the `GET /me` profile
+  confirmation, and the conversation page (`/app/conversations/{conversation_id}`) with its header,
+  empty message area and composer; see [`apps/web/README.md`](./apps/web/README.md) for commands.
 - `apps/api/` — the FastAPI backend/API: `GET /health`, the authentication boundary
   (`AuthenticatedUser`, `require_authenticated_user`), `GET /me`, which resolves the signed-in user's
   profile from `public.profiles`, and the conversation endpoints — `POST /conversations`,
@@ -114,8 +116,9 @@ resolves the authenticated identity and their `profiles` row behind `GET /me`, a
 versioned migrations for both `profiles` and `conversations`. Conversation **creation, retrieval,
 renaming, and deletion** are in place (`POST /conversations`, `GET /conversations`,
 `GET /conversations/{conversation_id}`, `PATCH /conversations/{conversation_id}`, and
-`DELETE /conversations/{conversation_id}`, all scoped to the verified caller); messaging in a
-conversation is not. No agent execution exists yet.
+`DELETE /conversations/{conversation_id}`, all scoped to the verified caller), and the conversation page
+renders one conversation from them: header, empty message area, composer. Persisting a message in a
+conversation is not — the composer sends nothing yet — and no agent execution exists.
 
 High-level upcoming stages:
 
