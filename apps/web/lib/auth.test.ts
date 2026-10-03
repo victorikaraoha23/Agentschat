@@ -16,11 +16,48 @@ import {
   signInWithEmail,
   signOut,
   signUpWithEmail,
+  subscribeToSession,
   type AuthClientLike,
   type ClientAuthResultLike,
+  type SessionState,
 } from "./auth.ts";
 
 const USER = { id: "user-1", email: "person@example.com" };
+
+test("session subscriptions report initial identity, account changes and signout, and unsubscribe", () => {
+  const states: SessionState[] = [];
+  type Listener = Parameters<NonNullable<Parameters<typeof subscribeToSession>[1]>["auth"]["onAuthStateChange"]>[0];
+  let emit: Listener = () => assert.fail("listener has not been registered");
+  let unsubscribed = false;
+  const unsubscribe = subscribeToSession((state) => states.push(state), {
+    auth: {
+      onAuthStateChange(callback) {
+        emit = callback;
+        return { data: { subscription: { unsubscribe() { unsubscribed = true; } } } };
+      },
+    },
+  });
+
+  emit("INITIAL_SESSION", { user: USER });
+  emit("SIGNED_IN", { user: { id: "user-2" } });
+  emit("TOKEN_REFRESHED", { user: { id: "user-2" } });
+  emit("SIGNED_OUT", null);
+  assert.deepEqual(states, [
+    { status: "authenticated", userId: USER.id, email: USER.email },
+    { status: "authenticated", userId: "user-2", email: null },
+    { status: "authenticated", userId: "user-2", email: null },
+    { status: "unauthenticated" },
+  ]);
+  unsubscribe();
+  assert.equal(unsubscribed, true);
+});
+
+test("session subscriptions report missing configuration without a provider", () => {
+  const states: SessionState[] = [];
+  const unsubscribe = subscribeToSession((state) => states.push(state), null);
+  assert.deepEqual(states, [{ status: "unconfigured" }]);
+  assert.doesNotThrow(unsubscribe);
+});
 
 function authResult(
   overrides: Partial<ClientAuthResultLike>,
