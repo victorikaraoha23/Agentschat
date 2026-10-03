@@ -1,4 +1,31 @@
-# Tech Context — Hermes Agent checkout
+# Tech Context — AgentsChat + Hermes runtime checkout
+
+## AgentsChat stack
+- `apps/web`: independent npm package `agentschat-web` — Next `16.3.5` (App Router, Turbopack), React
+  `19.2.8`, TypeScript strict, ESLint `eslint-config-next`, `@supabase/supabase-js` `2.117.2`,
+  `@vercel/analytics` + `@vercel/speed-insights`. No UI framework, component library, or test framework.
+- `apps/api`: independent `uv` project — FastAPI, uvicorn, pydantic-settings, `supabase` (service role on
+  the server only), pytest + httpx. Run `uv` commands from inside `apps/api`.
+- `supabase/migrations`: versioned SQL (profiles, conversations) with RLS.
+- Environment: web `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+  (public only); API `AGENTSCHAT_API_*` (service-role key stays server-side).
+
+## AgentsChat commands
+- Web (`apps/web`): `npm install --workspaces=false`, `npm test`, `npm run typecheck`
+  (`next typegen && tsc --noEmit`), `npm run lint`, `npm run build`, `npm run dev`.
+- API (`apps/api`): `uv sync`, `uv run pytest -q`, `uv run uvicorn app.main:app`.
+- Hermes source: `scripts/run_tests.sh` only — never a bare `pytest`.
+
+## AgentsChat test conventions
+- Frontend: Node's built-in runner (`node --test`), test files listed explicitly in `package.json`
+  (alphabetical), colocated as `<module>.test.ts` and imported with an explicit `.ts` specifier
+  (`allowImportingTsExtensions`). `fetch` is injected, so no test touches the network.
+- Backend: pytest with `TestClient`; store doubles implement the service Protocols, so API logic is tested
+  without Supabase. Authorization is tested negatively — one user can never read or modify another's rows.
+- Behaviour over snapshots; no DOM/browser harness exists, so UI logic lives in pure functions that can be
+  tested directly.
+
+## Hermes runtime stack
 
 ## Stack
 - Python `>=3.11,<3.14` (cap load-bearing: Rust transitives lack cp314 wheels). Exact `==` pins in `pyproject.toml` (post Mini Shai-Hulud 2026-05-12); `uv lock` after changes; upper bounds on all deps.

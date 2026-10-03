@@ -1,0 +1,119 @@
+/* Conversation workspace layout (Task 6.1).
+   Page-scoped: the design tokens, element styles and `.surface` come from
+   `app/globals.css`; this file only places the header, message area and
+   composer in one column that adapts to the viewport. No framework, no
+   component library, no device detection. */
+
+.workspace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  /* Fill the viewport so the composer sits at the bottom and the page does not
+     jump between the loading, error and ready states. */
+  min-height: calc(100vh - 6rem);
+}
+
+/* The header keeps the title readable and the back link reachable; it stacks on
+   narrow screens instead of squeezing the title. */
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm) var(--space-lg);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+}
+
+/* The message area grows to take the space between header and composer. Future
+   messages render here as children of this section. */
+.messageArea {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+/* The empty state is centred in the message area and reads as a placeholder,
+   not as content. */
+.empty {
+  display: grid;
+  flex: 1;
+  align-content: center;
+  justify-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-2xl) var(--space-lg);
+  text-align: center;
+}
+
+.emptyTitle {
+  margin: 0;
+  font-size: var(--font-size-base);
+}
+
+/* Loading, sign-in, not-found and failure states share one centred block so the
+   page reads the same way whatever went wrong. */
+.state {
+  display: grid;
+  flex: 1;
+  align-content: center;
+  justify-items: start;
+  gap: var(--space-sm);
+}
+
+.stateTitle {
+  margin: 0;
+}
+
+.stateActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.composerLabel {
+  font-weight: var(--font-weight-medium);
+  font-size: var(--font-size-sm);
+}
+
+/* The field takes the free width and the Send button keeps its own, so the row
+   never overflows horizontally. */
+.composerRow {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-md);
+}
+
+.composerInput {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--control-height);
+  padding: var(--space-sm) var(--space-md);
+  font: inherit;
+  color: var(--foreground);
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  resize: vertical;
+}
+
+.composerNotice {
+  margin: 0;
+}
+
+/* On a narrow phone the Send button moves below the field: one tap target per
+   row, and nothing is cut off horizontally. */
+@media (max-width: 30rem) {
+  .composerRow {
+    flex-direction: column;
+  }
+}

@@ -6,9 +6,10 @@ frontend of the product and, per the root `AGENTS.md`, communicates with the Age
 **Status: foundation only.** The app proves itself end to end: the public home page requests `GET /health`
 from the browser, `/signup` + `/login` create and use a Supabase Auth session (signup, sign in, sign
 out, session detection), and the authenticated shell at `/app` confirms who is signed in and that the
-API resolves their AgentsChat profile (`GET /me`). There is still no chat, no agent integration, no
-profile page, and no database query from the browser — accounts are authentication plus this single
-confirmation.
+API resolves their AgentsChat profile (`GET /me`), and the conversation workspace at
+`/app/conversations/{conversationId}` opens one conversation the signed-in user owns: its title, an empty
+message area, and a composer. Messaging, agent execution, and a profile page are still absent — the
+composer accepts typing but sends nothing, because no message is persisted yet.
 
 ## Commands
 
@@ -22,7 +23,7 @@ Run from `apps/web/`:
 | `npm run start` | Serve the production build |
 | `npm run lint` | ESLint (`eslint.config.mjs`, `eslint-config-next`) |
 | `npm run typecheck` | `next typegen && tsc --noEmit` |
-| `npm test` | Node's built-in test runner (`node --test`) for the API-request, auth, profile, and conversation modules |
+| `npm test` | Node's built-in test runner (`node --test`) for the API-request, auth, profile, conversation, and conversation-page modules |
 
 ## Configuration
 
@@ -37,7 +38,7 @@ values are compiled into the browser bundle (`apps/web/.env.example` documents t
 
 No `.env` file is needed: the defaults run locally without Supabase. The app reaches the API through
 three small modules — `app/health-api.ts` (`GET /health`), `lib/profile-api.ts` (`GET /me`), and
-`lib/conversations-api.ts` (create, list, and read conversations) — each of which builds the request
+`lib/conversations-api.ts` (the five conversation requests) — each of which builds the request
 URL from `lib/api-base-url.ts`, applies a five-second deadline, checks the HTTP status, validates the
 response shape and returns a typed result. Failures are categorised so the UI can tell them
 apart: `unauthenticated` (no usable session, or the API rejected the token), `invalid-input` (the API
@@ -101,7 +102,46 @@ derives ownership from the token it verifies:
 
 Results are typed (`unauthenticated` / `invalid-input` / `not-found` / `network` / `http` /
 `invalid-response` / `unexpected`) with fixed messages of our own; raw bodies never reach the UI.
-No product UI uses them yet — they exist so tests and the next tasks have a typed conversation path.
+Only `getConversation` has a caller in the product today: the conversation page (below). Create, list,
+rename, and delete have no UI yet — their screens belong to later tasks.
+
+## Conversation page
+
+`/app/conversations/[conversationId]` is the conversation workspace (Task 6.1). The route (`page.tsx`)
+is a server component that resolves the dynamic segment and passes **only** the `conversationId` onward;
+the page body (`conversation-page.tsx`, `"use client"`) gates access through the same boundary as the
+rest of the application — the session `lib/auth.ts` reports, mapped with `toShellAccess` — and loads the
+conversation with `getConversation`. Nothing about ownership comes from the URL or from client state: the
+API decides it from the verified token.
+
+The page renders exactly one state, decided by the pure `toConversationPageView` in
+`lib/conversation-view.ts`:
+
+| State | When | What the user sees |
+|---|---|---|
+| `loading` | the session is resolving, or the conversation request is in flight | a status line inside the same frame the ready page uses, so the layout does not jump |
+| `denied` | no session, an unconfigured or unreadable one, or a token the API rejected | the reason and a way to sign in — the established authentication behavior, not a retry loop |
+| `not-found` | the API answered `not-found`, or refused the id as invalid | a safe "conversation not found" state; a conversation owned by someone else is reported identically, so existence never leaks |
+| `error` | `network`, `http`, `invalid-response`, or `unexpected` | the API module's own fixed message plus a **Try again** button — never a raw body, status, or error object |
+| `ready` | the conversation loaded | header, message area, composer |
+
+A conversation with no title falls back to `UNTITLED_CONVERSATION`, so the heading is never empty.
+
+The header shows that title as the page heading and offers a real link back to `/app`. Rename, delete,
+agent, model, tool, settings, sharing, conversation lists, and search are **not** stubbed here — those
+screens belong to later tasks.
+
+`chat-composer.tsx` is the composer: a labelled `textarea` and a real `Send` button, disabled while the
+draft holds no text. **It sends nothing.** Its rules live in the pure `lib/conversation-composer.ts`:
+submitting shows `COMPOSER_NOTICE_MESSAGE` ("messages are not sent yet") in a status region and keeps the
+typed draft, because nothing was delivered — no request, no stored message, no simulated reply. The rules
+are unit-tested; the component only renders them.
+
+Layout is one column, in the route's scoped stylesheet (`conversation.module.css`): header at the top, a
+growing message area, composer at the bottom, all reading the existing tokens from `app/globals.css`.
+Below `30rem` the Send button moves under the field, so nothing overflows horizontally. There is no device
+detection, no responsive state, and no skeleton infrastructure.
+
 
 ## Profile check
 
@@ -127,9 +167,10 @@ signed-out view.
 - **Responsive.** The shell header stacks on narrow screens and spreads out past `40rem`; grids and flex
   wrap do the rest — no breakpoints file, no device detection.
 
-`components/auth-form.module.css` is the only scoped stylesheet; it now reads the same tokens (surface
-inputs, `--border` borders, `--control-height` targets, hover border, token transition). Everything else
-is element styles plus the `.surface`, `.shell-nav`, and `.app-shell*` classes the shell uses.
+Scoped stylesheets read the same tokens as the element styles: `components/auth-form.module.css` (surface
+inputs, `--border` borders, `--control-height` targets, hover border, token transition) and the
+conversation route's `conversation.module.css` (one column: header, growing message area, composer). The
+rest is element styles plus the `.surface`, `.shell-nav`, and `.app-shell*` classes the shell uses.
 
 ### Contrast baseline
 
@@ -176,7 +217,6 @@ The root layout renders Vercel's **Web Analytics** (`@vercel/analytics`) and **S
 (`@vercel/speed-insights`) — first-party telemetry for traffic and real-user performance. These are part of
 the deployment story rather than new infrastructure: no server, database, queue, credential, or environment
 variable is involved, and both packages are Vercel's official Next.js integrations.
-
 How they behave (read from the installed packages' source, not assumed):
 
 | Context | Behavior |
@@ -205,6 +245,13 @@ apps/web/
 │   ├── globals.css         # application-wide styles
 │   ├── health-api.ts       # calls GET /health and returns a typed result
 │   └── health-api.test.ts  # node:test coverage for that module
+│   ├── (app)/app/conversations/[conversationId]/   # authenticated conversation workspace
+│   │   ├── page.tsx                  # the route: resolves the id, renders the page
+│   │   ├── conversation-page.tsx      # session gate, conversation load, and the one view
+│   │   ├── conversation-header.tsx    # title heading and a real link back to /app
+│   │   ├── conversation-empty-state.tsx
+│   │   ├── chat-composer.tsx         # message field and Send (sends nothing yet)
+│   │   └── conversation.module.css   # page-scoped layout for this route
 ├── components/
 │   ├── auth-form.tsx            # shared email/password form (signup + login)
 │   ├── auth-form.module.css     # scoped styles for that form
@@ -214,7 +261,11 @@ apps/web/
 │   ├── api-base-url.ts          # the single read of NEXT_PUBLIC_API_URL
 │   ├── auth.ts                  # the only module that talks to Supabase Auth
 │   ├── auth.test.ts             # node:test coverage for that module
-│   ├── conversations-api.ts      # creates, lists, and reads conversations (typed results)
+│   ├── conversation-composer.ts   # the composer's pure rules: typing, the send gate, submitting
+│   ├── conversation-composer.test.ts # node:test coverage for that module
+│   ├── conversation-view.ts       # maps session + API result to the one view the page renders
+│   ├── conversation-view.test.ts  # node:test coverage for that module
+│   ├── conversations-api.ts      # creates, lists, reads, renames, and deletes conversations
 │   ├── conversations-api.test.ts # node:test coverage for that module
 │   ├── profile-api.ts           # calls GET /me with the session's token
 │   ├── profile-api.test.ts      # node:test coverage for that module
@@ -250,7 +301,10 @@ Next.js conventions apply. These are the only project-specific rules on top of t
   `CopyButton`). A single-use component stays next to the page that uses it until it is genuinely shared.
 - **Shared utilities.** Framework-agnostic helpers used more than once go in `apps/web/lib/`. Nothing that
   belongs to the API, the database, or a secret may end up in the browser bundle. The Supabase browser
-  client lives there because it will be shared; it carries only the public URL + anon key.
+  client lives there because it will be shared; it carries only the public URL + anon key. Framework-
+  agnostic decision logic that carries its own tests lives there too, even when one component uses it
+  (`shell-access.ts`, `conversation-view.ts`, `conversation-composer.ts`), so a component renders a decided
+  state instead of re-deriving one.
 - **Calling the API.** Browser requests go through small modules (`app/health-api.ts`,
   `lib/profile-api.ts`): the platform `fetch`, an HTTP-status check, response-shape validation, and a typed
   result instead of a thrown error. No HTTP library, and no abstraction layer for endpoints that do not

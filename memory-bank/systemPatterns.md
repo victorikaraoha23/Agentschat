@@ -1,3 +1,41 @@
+# System Patterns — AgentsChat
+
+## Layering (root `AGENTS.md` §2–§3)
+`apps/web` (UI only) → `apps/api` (endpoints, business rules, authorization) → `supabase/` (auth, data,
+RLS). The browser never touches the database or a service-role key; Hermes is not imported anywhere yet.
+Single direction, no cycles: a UI concern never moves down, a data rule never moves up.
+
+## API surface (`apps/api`)
+- Thin routes → services → store Protocols; tests substitute fakes at the Protocol seam.
+- Every request/response is a Pydantic model with explicit status codes; unknown fields are dropped, so a
+  forged `user_id` cannot be bound.
+- Ownership is enforced **in the statement** (`.eq(id).eq(user_id)`), not by a prior lookup — a foreign id
+  matches nothing and yields the same `404` as a missing one.
+- Store failures become fixed `503` details; an unexpected error becomes a generic `500` body. Provider
+  text, SQL, and file paths never reach a client. Store `not found` and API `not found` are deliberately
+  the same message.
+
+## Database (`supabase/migrations`)
+- Migrations are the source of truth. `0001` `profiles`, `0002` `conversations` (`user_id` → profiles,
+  cascade), both with RLS enabled and owner-scoped policies on `auth.uid() = user_id`; the insert policy's
+  `with check` rejects a forged owner.
+- `updated_at` is maintained by a `before update` trigger, never written by the application.
+
+## Frontend (`apps/web`)
+- One authentication boundary: `lib/auth.ts` is the only module that touches Supabase Auth; every private
+  page maps the session through the pure `toShellAccess` in `lib/shell-access.ts`. No route guard, no
+  middleware, no second auth system.
+- One API boundary per resource (`app/health-api.ts`, `lib/profile-api.ts`, `lib/conversations-api.ts`):
+  platform `fetch`, 5-second deadline, bearer token only (never a user id), typed never-throwing results
+  with fixed user-safe messages. Failures are categorised so the UI can distinguish them.
+- UI state is decided by **pure functions** in `lib/` (`shell-access`, `conversation-view`,
+  `conversation-composer`) and rendered by components — the pattern that keeps pages testable without a
+  browser. Single-use components are colocated with their route; shared ones live in `components/`.
+- Styling: semantic tokens in `app/globals.css`, page-scoped CSS modules colocated with the route. No UI
+  framework, component library, or global state store.
+- Server components by default; `"use client"` only on the component that needs the browser. A dynamic
+  route awaits `params` and passes only the id.
+
 # System Patterns — Hermes Agent
 
 ## Facade + siblings (Sep 2026 decomposition)
