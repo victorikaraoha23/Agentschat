@@ -34,6 +34,14 @@ class ProfileRowLike(Protocol):
     updated_at: datetime
 
 
+class ProfileRow(BaseModel):
+    """Typed profile fields parsed from the SDK's JSON row data."""
+
+    id: str
+    created_at: datetime
+    updated_at: datetime
+
+
 class ProfileRowNotFoundError(Exception):
     """No profile row exists for the verified identity (trigger lag or drift)."""
 
@@ -47,14 +55,14 @@ class ProfileQueryLike(Protocol):
     def maybe_single(self) -> ProfileQueryLike:
         """Accept zero or one row instead of failing on an empty result."""
 
-    def execute(self) -> ProfileResultLike:
+    def execute(self) -> ProfileResultLike | None:
         """Run the query against Supabase."""
 
 
 class ProfileResultLike(Protocol):
     """What the executed single-row query hands back."""
 
-    data: ProfileRowLike | None
+    data: ProfileRowLike | dict[str, object] | None
 
 
 class ProfileTableLike(Protocol):
@@ -91,6 +99,7 @@ class SupabaseProfileStore:
         settings: Settings,
         client_factory: Callable[[Settings], ProfileClientLike] = get_supabase_client,
     ) -> None:
+        """Retain settings and a client factory for use when a lookup is requested."""
         self._settings = settings
         self._client_factory = client_factory
 
@@ -104,6 +113,10 @@ class SupabaseProfileStore:
             .maybe_single()
             .execute()
         )
+        if result is None or result.data is None:
+            return None
+        if isinstance(result.data, dict):
+            return ProfileRow.model_validate(result.data)
         return result.data
 
 
