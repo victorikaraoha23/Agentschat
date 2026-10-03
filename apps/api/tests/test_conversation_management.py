@@ -617,7 +617,7 @@ def test_delete_maps_a_failing_store_to_a_safe_503(
 class RecordingResult:
     """Stand-in for an executed write's result."""
 
-    def __init__(self, data: dict[str, object] | None) -> None:
+    def __init__(self, data: list[dict[str, object]] | None) -> None:
         """Expose the prepared payload through the result's data field."""
         self.data = data
 
@@ -629,7 +629,6 @@ class RecordingWriteQuery:
         """Prepare the result the executed query should hand back."""
         self.filters: list[tuple[str, object]] = []
         self.selected: tuple[str, ...] = ()
-        self.single_row = False
         self._result = result
 
     def eq(self, column: str, value: object) -> RecordingWriteQuery:
@@ -640,11 +639,6 @@ class RecordingWriteQuery:
     def select(self, *columns: str) -> RecordingWriteQuery:
         """Record the columns the write returns."""
         self.selected = columns
-        return self
-
-    def maybe_single(self) -> RecordingWriteQuery:
-        """Record that this write accepts zero or one row."""
-        self.single_row = True
         return self
 
     def execute(self) -> RecordingResult | None:
@@ -699,7 +693,7 @@ def make_store(
 
 def test_rename_statement_is_owner_scoped_and_returns_the_row() -> None:
     """The update filters on id *and* owner, then reads the row back."""
-    store, table = make_store(RecordingResult(dict(MY_ROW, title="renamed")))
+    store, table = make_store(RecordingResult([dict(MY_ROW, title="renamed")]))
 
     renamed = store.rename_for_user(USER_ID, CONVERSATION_ID, "renamed")
 
@@ -713,23 +707,21 @@ def test_rename_statement_is_owner_scoped_and_returns_the_row() -> None:
         "created_at",
         "updated_at",
     )
-    assert table.query.single_row is True
     assert renamed is not None
     assert renamed.title == "renamed"
 
 
-def test_rename_matching_no_row_is_nothing() -> None:
+@pytest.mark.parametrize("result", [None, RecordingResult(None), RecordingResult([])])
+def test_rename_matching_no_row_is_nothing(result: RecordingResult | None) -> None:
     """A foreign id and a nonexistent id both come back as "no row"."""
-    absent, _ = make_store(None)
-    no_data, _ = make_store(RecordingResult(None))
+    store, _ = make_store(result)
 
-    assert absent.rename_for_user(USER_ID, OTHER_CONVERSATION_ID, "x") is None
-    assert no_data.rename_for_user(USER_ID, OTHER_CONVERSATION_ID, "x") is None
+    assert store.rename_for_user(USER_ID, OTHER_CONVERSATION_ID, "x") is None
 
 
 def test_delete_statement_is_owner_scoped() -> None:
     """The delete filters on id *and* owner before anything is removed."""
-    store, table = make_store(RecordingResult(dict(MY_ROW)))
+    store, table = make_store(RecordingResult([dict(MY_ROW)]))
 
     deleted = store.delete_for_user(USER_ID, CONVERSATION_ID)
 
@@ -737,17 +729,22 @@ def test_delete_statement_is_owner_scoped() -> None:
     assert table.deleted is True
     assert table.updated is None
     assert table.query.filters == [("id", CONVERSATION_ID), ("user_id", USER_ID)]
-    assert table.query.single_row is True
+    assert table.query.selected == (
+        "id",
+        "user_id",
+        "title",
+        "created_at",
+        "updated_at",
+    )
     assert deleted is True
 
 
-def test_delete_matching_no_row_reports_failure() -> None:
+@pytest.mark.parametrize("result", [None, RecordingResult(None), RecordingResult([])])
+def test_delete_matching_no_row_reports_failure(result: RecordingResult | None) -> None:
     """A foreign id and a nonexistent id both come back as "nothing deleted"."""
-    absent, _ = make_store(None)
-    no_data, _ = make_store(RecordingResult(None))
+    store, _ = make_store(result)
 
-    assert absent.delete_for_user(USER_ID, OTHER_CONVERSATION_ID) is False
-    assert no_data.delete_for_user(USER_ID, OTHER_CONVERSATION_ID) is False
+    assert store.delete_for_user(USER_ID, OTHER_CONVERSATION_ID) is False
 
 
 # --------------------------------------------------------------------------
