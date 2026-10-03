@@ -82,9 +82,9 @@ export function AppShell() {
   }
 
   return (
-    <div>
-      <header className="app-shell-header">
-        <p className="status-line">AgentsChat</p>
+    <div className="app-shell">
+      <header className="app-shell-header surface">
+        <p className="status-line app-shell-brand">AgentsChat</p>
         <nav aria-label="Application">
           <ul className="shell-nav">
             {SHELL_NAV.map((entry) => (
@@ -106,7 +106,7 @@ export function AppShell() {
           </p>
         )}
       </header>
-      <section aria-label="Application content">
+      <section aria-label="Application content" className="surface app-shell-content">
         <p className="muted">
           This is the authenticated application shell. Product features will live here; today it only
           confirms who is signed in.

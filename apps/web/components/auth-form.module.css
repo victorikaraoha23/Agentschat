@@ -1,29 +1,36 @@
-/* Scoped styles for the shared authentication form (Task 3.2). */
+/* Scoped styles for the shared authentication form (Task 3.2). Spacing, color,
+   and radius come from the Task 4.2 foundation in `app/globals.css`. */
 
 .form {
   display: grid;
-  gap: 0.75rem;
-  margin: 1.5rem 0 0;
+  gap: var(--space-md);
+  margin: var(--space-xl) 0 0;
 }
 
 .field {
   display: grid;
-  gap: 0.25rem;
-  font-weight: 600;
+  gap: var(--space-xs);
+  font-weight: var(--font-weight-medium);
 }
 
 .input {
-  padding: 0.5rem 0.6rem;
+  min-height: var(--control-height);
+  padding: var(--space-sm) var(--space-md);
   font: inherit;
-  font-weight: 400;
+  font-weight: var(--font-weight-normal);
   color: var(--foreground);
-  background: var(--background);
-  border: 1px solid var(--muted);
-  border-radius: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: border-color var(--transition-fast);
+}
+
+.input:hover {
+  border-color: var(--muted);
 }
 
 .message {
-  margin: 1rem 0 0;
+  margin: var(--space-lg) 0 0;
 }
 
 .ok {
@@ -35,7 +42,7 @@
 }
 
 .footer {
-  margin: 1rem 0 0;
+  margin: var(--space-lg) 0 0;
   color: var(--muted);
   font-size: 0.95rem;
 }
@@ -43,6 +50,6 @@
 .hint {
   margin: 0;
   color: var(--muted);
-  font-size: 0.9rem;
-  font-weight: 400;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-normal);
 }

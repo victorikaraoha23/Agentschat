@@ -85,6 +85,39 @@ account section renders `components/profile-status.tsx`, a single "resolved for 
 fixed failure message); it is mounted only while a session exists, so no profile data can appear in a
 signed-out view.
 
+## Design foundation
+
+`app/globals.css` holds the whole visual system (Task 4.2) — no framework, no component library:
+
+- **Tokens.** Typography (`--font-sans`, base/sm/lg/xl sizes, body/heading line heights, three weights),
+  spacing (`--space-xs`…`--space-2xl`), semantic colors (`--background`, `--foreground`, `--muted`,
+  `--surface`, `--border`, `--primary` + `--primary-hover` + `--primary-foreground`, `--ok`, `--error`,
+  `--focus`, each with a dark-mode value), and shape/depth/motion (`--radius-sm/md`, `--shadow-sm`,
+  `--transition-fast`, `--content-max-width: 42rem`, `--control-height: 2.5rem`).
+- **Elements.** Box sizing, body background/type/color, heading hierarchy, link color + hover, a `.surface`
+  card primitive (surface background, border, radius, shadow), primary-action buttons with hover/disabled
+  states, font-inheriting inputs, a 2px `--focus` focus-visible ring, and a reduced-motion block that
+  disables transitions and animations.
+- **Responsive.** The shell header stacks on narrow screens and spreads out past `40rem`; grids and flex
+  wrap do the rest — no breakpoints file, no device detection.
+
+`components/auth-form.module.css` is the only scoped stylesheet; it now reads the same tokens (surface
+inputs, `--border` borders, `--control-height` targets, hover border, token transition). Everything else
+is element styles plus the `.surface`, `.shell-nav`, and `.app-shell*` classes the shell uses.
+
+### Contrast baseline
+
+| Pair | Light | Dark | Use |
+|---|---|---|---|
+| foreground on background | 18.5 | 17.6 | body text |
+| muted on background | 6.4 | 7.8 | secondary text, hints |
+| primary on background | 4.6 | 6.3 | links |
+| primary-foreground on primary | 4.6 | 5.1 | buttons |
+| ok / error on background | 5.1 / 6.6 | 7.7 / 7.8 | status text |
+
+Values are relative-luminance ratios from the hex pairs in `globals.css` (WCAG AA for normal text is
+4.5; muted secondary text clears it in both modes).
+
 ## Note on npm workspaces
 
 This app is an **independent** package even though `apps/` is matched by the Hermes runtime's root
