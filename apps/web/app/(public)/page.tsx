@@ -1,11 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { AuthStatus } from "@/components/auth-status";
 
-import { checkApiHealth, type HealthCheckResult } from "./health-api";
+import { checkApiHealth, type HealthCheckResult } from "../health-api";
 
+/** Render the public landing page with API health, session status, and app access. */
 export default function Home() {
   const [health, setHealth] = useState<HealthCheckResult | null>(null);
 
@@ -29,9 +31,9 @@ export default function Home() {
         hosted system handles agent execution, tools, files, and memory.
       </p>
       <p className="muted">
-        This page is the foundation of the web application and exists to show that the Next.js app renders.
-        Chat and agent execution are not implemented yet; accounts cover signup, sign in, sign out, and
-        resolving your AgentsChat profile.
+        This page is the public foundation of the web application and exists to show that the Next.js app
+        renders. Chat and agent execution are not implemented yet; accounts cover signup, sign in, sign
+        out, and resolving your AgentsChat profile.
       </p>
       <section aria-label="Integration status" aria-live="polite">
         <p className="status-line">
@@ -51,6 +53,9 @@ export default function Home() {
       <section aria-label="Account status">
         <h2>Account</h2>
         <AuthStatus />
+        <p className="muted">
+          Signed in? <Link href="/app">Open the application shell</Link>.
+        </p>
       </section>
     </main>
   );
