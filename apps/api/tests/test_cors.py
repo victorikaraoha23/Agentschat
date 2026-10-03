@@ -43,3 +43,19 @@ def test_preflight_allows_get_from_dev_origin() -> None:
     )
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
+def test_preflight_allows_conversation_creation_from_dev_origin() -> None:
+    """The creation endpoint's POST is reachable cross-origin in development."""
+    response = client.options(
+        "/conversations",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert "POST" in response.headers["access-control-allow-methods"]

@@ -1,7 +1,7 @@
 # Active Context
 
-- **Date:** 2026-10-03 (Task 4.1 session: Application Shell). Checkout branch `update`.
-- **Current task:** Task 4.1 (Application Shell) — implement the authenticated shell at `/app`.
+- **Date:** 2026-10-03 (Task 5.2 session: Conversation Creation). Checkout branch `update`.
+- **Current task:** Task 5.2 (Conversation Creation) — implement `POST /conversations`.
 - **What was done:**
   - **Task 0.1 (2026-09-22):** rewrote root `AGENTS.md` as the AgentsChat engineering constitution
     (mission, separation of concerns, dependency direction, simplicity, atomic dev, type safety, API,
@@ -109,6 +109,25 @@
     `test` script covers all three files; `apps/web/.env.example` gained the two public vars. Tests:
     `tests/test_supabase.py` (7 tests: defaults, pair loading, half-pair rejection, clear missing error,
     construction, unconfigured lifespan + /health). No page uses the browser client yet.
+  - **Task 5.2 (2026-10-03):** conversation creation. Backend: `POST /conversations`
+    (`response_model=Conversation`, `201`) with `CreateConversationRequest` (`title` optional, max 200 —
+    `MAX_CONVERSATION_TITLE_LENGTH`), `normalize_conversation_title` (trimmed, blank → `None`), the
+    `get_conversation_store` dependency and a thin handler that delegates to `ConversationStore.create`
+    with the verified `user.user_id`. Ownership is never read from the body — `user_id` is absent from the
+    request model, so a forged field is dropped by validation. `app/conversations.py` gained the
+    `ConversationStore` protocol, `SupabaseConversationStore` (single-row insert of exactly
+    `(user_id, title)` through the service-role client, columns read back, `ConversationCreateError`) and
+    narrow `Protocol` seams mirroring the client chain. `ConversationCreateError`,
+    `PostgrestAPIError`/`SupabaseException`/`SupabaseNotConfiguredError`/`HTTPError` all map to a fixed
+    `503 {"detail": "The conversation could not be created."}`; invalid auth stays `401` and invalid input
+    `422`. CORS now allows `POST`. 11 new tests in `tests/test_conversation_creation.py` (401 paths, title
+    validation and normalization, ownership from the verified identity for two different users, forged
+    body `user_id`, store failure, and the insert payload/columns); the Task 5.1 route-surface test now
+    asserts `/conversations` exposes exactly `POST`. Frontend: `lib/conversations-api.ts`
+    (`createConversation`) posts `{title?}` with the session's bearer token (never a user id), never
+    throws, and returns a typed result (`unauthenticated`/`invalid-input`/`network`/`http`/
+    `invalid-response`/`unexpected`) with fixed messages; `lib/conversations-api.test.ts` (7 tests) and the
+    `test` script updated. No product UI uses it yet.
 - **Open questions / pending user input:**
   - The root `package.json` npm workspace glob (`apps/*`) still matches `apps/web`. Task 1.1 decided the app is
     an independent package (`npm install --workspaces=false`); narrowing the glob remains an explicitly scoped
@@ -116,8 +135,10 @@
   - Should `pyproject.toml`'s `readme = "README.md"` be repointed to `docs/hermes-runtime.md` (moved
     Hermes README), and should `apps/desktop/README.md`'s `../../README.md` link follow it?
 - **Next steps:**
-  - Start Task 2.3 only on explicit instruction; read the root `AGENTS.md`, `apps/api/README.md`, and
+  - Start the next task only on explicit instruction; read the root `AGENTS.md`, `apps/api/README.md`, and
     `apps/web/README.md` first.
+  - `memory-bank/` notes are behind: Tasks 3.3, 4.1, 4.2 and 5.1 are recorded in git history and the app
+    READMEs but not in the "What was done" list here.
   - On code changes: `scripts/run_tests.sh` for Hermes source; keep prompt-caching and profile-scope
     invariants.
 - **Key files for orientation:** `AGENTS.md` → `README.md` → `docs/hermes-runtime.md` → `memory-bank/*`;

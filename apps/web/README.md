@@ -35,10 +35,11 @@ values are compiled into the browser bundle (`apps/web/.env.example` documents t
 | `NEXT_PUBLIC_SUPABASE_URL` | *(unset)* | Supabase project URL (public identifier, browser-safe); when unset the client is unavailable |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | *(unset)* | Supabase anonymous/public key (browser-safe by design) — never a privileged key; when unset the client is unavailable |
 
-No `.env` file is needed: the defaults run locally without Supabase. The app reaches the API through two
-small modules — `app/health-api.ts` (`GET /health`) and `lib/profile-api.ts` (`GET /me`) — each of which
-builds the request URL from `lib/api-base-url.ts`, applies a five-second deadline, checks the HTTP status,
-validates the response shape and returns a typed result. Failures are categorised so the UI can tell them
+No `.env` file is needed: the defaults run locally without Supabase. The app reaches the API through
+three small modules — `app/health-api.ts` (`GET /health`), `lib/profile-api.ts` (`GET /me`), and
+`lib/conversations-api.ts` (`POST /conversations`) — each of which builds the request URL from
+`lib/api-base-url.ts`, applies a five-second deadline, checks the HTTP status, validates the response
+shape and returns a typed result. Failures are categorised so the UI can tell them
 apart: `network` (unreachable or timed out), `http` (non-success status, reported by status code only),
 `invalid-response` (malformed body or unexpected shape) and `unexpected` (anything else). The message shown
 to users is always these modules' own text — never a raw server body, stack trace, or error object — and the
@@ -73,8 +74,17 @@ header (brand, navigation, sign-out) with the profile confirmation below.
   the UI. Signup that still needs email confirmation is reported as `confirmation-required` — not as a
   signed-in user. `getCurrentSession` separates `unconfigured` and `error` from `unauthenticated`, so a
   broken check never looks like "signed out".
-- None of this is authorization: the API's single authenticated endpoint (`/me`) exists only to prove the
-  identity → profile bridge, and the browser decides nothing about what a user may do.
+- None of this is authorization: the API's authenticated endpoints (`GET /me`, which proves the identity →
+  profile bridge, and `POST /conversations`, which creates a row the caller owns) decide everything
+  themselves, and the browser decides nothing about what a user may do.
+
+## Conversation creation
+
+`lib/conversations-api.ts` (`createConversation`, Task 5.2) posts `{title?}` to `POST /conversations`
+with the session's bearer token — never a user id, because the API derives ownership from the token
+it verifies. Results are typed (`unauthenticated` / `invalid-input` / `network` / `http` /
+`invalid-response` / `unexpected`) with fixed messages; raw bodies never reach the UI. No product UI
+uses it yet — it exists so tests and the next tasks have a typed creation path.
 
 ## Profile check
 

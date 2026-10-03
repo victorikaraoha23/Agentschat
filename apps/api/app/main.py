@@ -1,4 +1,4 @@
-"""AgentsChat FastAPI application: minimal foundation with a health check."""
+"""AgentsChat FastAPI application: health check, identity, and conversations."""
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -8,11 +8,16 @@ from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from httpx import HTTPError
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from supabase import PostgrestAPIError, SupabaseException
 
 from app.auth import AuthenticatedUser, require_authenticated_user
-from app.config import get_settings
+from app.config import Settings, get_settings
+from app.conversations import (
+    Conversation,
+    ConversationCreateError,
+    SupabaseConversationStore,
+)
 from app.logging_config import configure_logging, logger
 from app.profiles import (
     ProfileRowNotFoundError,
@@ -72,7 +77,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(DEV_ALLOWED_ORIGINS),
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -104,6 +109,63 @@ app.add_exception_handler(Exception, unhandled_exception_handler)
 def read_health() -> HealthResponse:
     """Report that the API process is up and serving requests."""
     return HealthResponse(status="healthy")
+
+
+#: Longest conversation title the API stores. Long enough for a human-written
+#: label, short enough to keep rows and future list views predictable.
+MAX_CONVERSATION_TITLE_LENGTH = 200
+
+
+class CreateConversationRequest(BaseModel):
+    """Body of POST /conversations: an optional title, nothing else.
+
+    `user_id` is deliberately absent: ownership always comes from the
+    authenticated identity, so a client field by that name must never control
+    it. Pydantic ignores unknown fields by default, which means a forged
+    `user_id` in the body is dropped before the handler ever sees it.
+    """
+
+    title: str | None = Field(default=None, max_length=MAX_CONVERSATION_TITLE_LENGTH)
+
+
+def normalize_conversation_title(title: str | None) -> str | None:
+    """Trim a title; blank or missing becomes `None` (the schema default)."""
+    if title is None:
+        return None
+    stripped = title.strip()
+    return stripped if stripped != "" else None
+
+
+def get_conversation_store(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> SupabaseConversationStore:
+    """Provide the conversation store the creation endpoint writes through."""
+    return SupabaseConversationStore(settings)
+
+
+@app.post("/conversations", response_model=Conversation, status_code=status.HTTP_201_CREATED)
+def create_conversation(
+    body: CreateConversationRequest,
+    user: Annotated[AuthenticatedUser, Depends(require_authenticated_user)],
+    store: Annotated[SupabaseConversationStore, Depends(get_conversation_store)],
+) -> Conversation:
+    """Create one conversation owned by the verified caller and return it.
+
+    Ownership is the caller's verified `user_id` — never a client-supplied
+    value. The database RLS `insert` policy remains the final boundary.
+    """
+    try:
+        return store.create(user.user_id, normalize_conversation_title(body.title))
+    except ConversationCreateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The conversation could not be created.",
+        ) from exc
+    except (PostgrestAPIError, SupabaseException, SupabaseNotConfiguredError, HTTPError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The conversation could not be created.",
+        ) from exc
 
 
 @app.get("/me", response_model=UserProfile)

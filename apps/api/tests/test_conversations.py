@@ -1,10 +1,11 @@
 """Conversation schema: migration structure, domain type, and RLS intent (Task 5.1).
 
-No endpoints exist yet, so there is nothing to call. These tests assert the
-migration file in the repository (not a remote schema) plus the minimal
-backend domain type. RLS behavior itself cannot run here — there is no live
-Postgres — so it is verified by reading the policy text, the strongest
-deterministic check available without a database.
+These tests assert the migration file in the repository (not a remote schema)
+plus the minimal backend domain type. RLS behavior itself cannot run here —
+there is no live Postgres — so it is verified by reading the policy text, the
+strongest deterministic check available without a database. The one exception
+is the route-surface check, which guards that Task 5.2 added creation and
+nothing beyond it.
 """
 
 from pathlib import Path
@@ -140,14 +141,20 @@ def test_conversation_model_rejects_malformed_rows() -> None:
         )
 
 
-def test_no_conversation_routes_exist_yet() -> None:
-    """Schema only: the API surface is still /health and /me, nothing more."""
-    paths = {route.path for route in app.routes if hasattr(route, "path")}
+def test_conversation_surface_is_creation_only() -> None:
+    """One creation route exists and nothing more — no speculative verbs."""
+    routes = {
+        (route.path, method)
+        for route in app.routes
+        if hasattr(route, "path") and hasattr(route, "methods")
+        for method in route.methods
+    }
 
-    assert "/health" in paths
-    assert "/me" in paths
-    assert not any(path.startswith("/conversations") for path in paths)
-    assert not any(path.startswith("/chats") for path in paths)
+    assert "/health" in {path for path, _ in routes}
+    assert "/me" in {path for path, _ in routes}
+    assert ("/conversations", "POST") in routes
+    assert [method for path, method in routes if path == "/conversations"] == ["POST"]
+    assert not any(path.startswith("/chats") for path, _ in routes)
 
 
 def test_app_starts_with_conversation_module_importable() -> None:
