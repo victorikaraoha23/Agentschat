@@ -7,6 +7,7 @@ import { AuthStatus } from "@/components/auth-status";
 
 import { checkApiHealth, type HealthCheckResult } from "../health-api";
 
+/** Render the public landing page with API health, session status, and app access. */
 export default function Home() {
   const [health, setHealth] = useState<HealthCheckResult | null>(null);
 

@@ -64,7 +64,6 @@ header (brand, navigation, sign-out) with the profile confirmation below.
   `signOut`, `getCurrentSession`, `getAccessToken`. Pages and components never touch the SDK, and
   `getAccessToken` hands a token straight to the one request needing it — the module never stores,
   caches, or renders an access token.
-  or renders it.
 - `/signup` and `/login` render `components/auth-form.tsx` (email, password, submit, inline
   success/error state); the home page renders `components/auth-status.tsx`, which shows the session state
   and signs out.

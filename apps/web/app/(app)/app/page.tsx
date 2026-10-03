@@ -1,5 +1,6 @@
 import { AppShell } from "@/components/app-shell";
 
+/** Render the app entry point, delegating session gating to AppShell. */
 export default function AppPage() {
   return (
     <main>
