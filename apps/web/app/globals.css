@@ -78,6 +78,31 @@ p {
   color: var(--error);
 }
 
+/* Minimal list layout for the application shell's navigation. */
+.shell-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+/* The authenticated shell stacks its header so it stays usable on narrow screens. */
+.app-shell-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+@media (min-width: 40rem) {
+  .app-shell-header {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem 1.5rem;
+  }
+}
 /* Base form-control styling. The authentication pages are the first controls in
    the application; keep this minimal and let component modules handle layout. */
 button {

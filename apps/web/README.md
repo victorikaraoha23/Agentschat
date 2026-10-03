@@ -3,11 +3,12 @@
 The AgentsChat web application: Next.js (App Router), React, TypeScript in strict mode. It is the
 frontend of the product and, per the root `AGENTS.md`, communicates with the AgentsChat API only.
 
-**Status: foundation only.** The app proves itself end to end: the home page requests `GET /health` from the
-browser, and `/signup` + `/login` create and use a Supabase Auth session (signup, sign in, sign out,
-session detection). A signed-in user additionally sees one line confirming that the API resolves their
-AgentsChat profile (`GET /me`). There is still no chat, no agent integration, no profile page, and no
-database query from the browser — accounts are authentication plus this single confirmation.
+**Status: foundation only.** The app proves itself end to end: the public home page requests `GET /health`
+from the browser, `/signup` + `/login` create and use a Supabase Auth session (signup, sign in, sign
+out, session detection), and the authenticated shell at `/app` confirms who is signed in and that the
+API resolves their AgentsChat profile (`GET /me`). There is still no chat, no agent integration, no
+profile page, and no database query from the browser — accounts are authentication plus this single
+confirmation.
 
 ## Commands
 
@@ -53,11 +54,16 @@ authentication simply reports itself unavailable.
 ## Authentication
 
 Email/password signup, sign-in, sign-out, session detection, and the `GET /me` profile check through
-Supabase Auth. No OAuth, no password reset, no email-verification screen, and no profile page.
+Supabase Auth. No OAuth, no password reset, no email-verification screen, and no profile page. The
+authenticated shell at `/app` reuses the same session boundary to decide access: while the session
+resolves it shows only a loading state (never private content), an unauthenticated, unconfigured, or
+unreadable session sees only a denial with a way back out, and a signed-in session sees the shell
+header (brand, navigation, sign-out) with the profile confirmation below.
 
 - `lib/auth.ts` is the only module that talks to Supabase Auth: `signUpWithEmail`, `signInWithEmail`,
   `signOut`, `getCurrentSession`, `getAccessToken`. Pages and components never touch the SDK, and
-  `getAccessToken` hands a token straight to the one request needing it — the module never stores, caches,
+  `getAccessToken` hands a token straight to the one request needing it — the module never stores,
+  caches, or renders an access token.
   or renders it.
 - `/signup` and `/login` render `components/auth-form.tsx` (email, password, submit, inline
   success/error state); the home page renders `components/auth-status.tsx`, which shows the session state

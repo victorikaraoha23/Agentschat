@@ -1,7 +1,7 @@
 # Active Context
 
-- **Date:** 2026-10-02 (Task 3.3 session: User Model). Checkout branch `update`.
-- **Current task:** Task 3.3 (User Model) — implementation + verification complete; commit pending.
+- **Date:** 2026-10-03 (Task 4.1 session: Application Shell). Checkout branch `update`.
+- **Current task:** Task 4.1 (Application Shell) — implement the authenticated shell at `/app`.
 - **What was done:**
   - **Task 0.1 (2026-09-22):** rewrote root `AGENTS.md` as the AgentsChat engineering constitution
     (mission, separation of concerns, dependency direction, simplicity, atomic dev, type safety, API,
