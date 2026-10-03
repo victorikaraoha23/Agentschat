@@ -156,6 +156,21 @@ profile can never exist for an arbitrary UUID. The schema lives in
 - **Reading:** `app/profiles.py` (`SupabaseProfileStore`, `load_user_profile`,
   `ProfileRowNotFoundError`) resolves one row for the identity the Task 3.2 dependency already verified.
 
+## Conversation schema (no API yet)
+
+`public.conversations` is the persistent conversation record — one row per user-owned conversation,
+keyed by a database-generated UUID, with `user_id uuid not null references public.profiles (id) on
+delete cascade` so the chain `auth.users → profiles → conversations` is explicit and a conversation
+can never name an arbitrary UUID. `title` is nullable with no default (no AI titles yet);
+`created_at`/`updated_at` are database-managed (`now()` defaults plus a before-update trigger
+mirroring migration 0001). The owner query pattern is indexed (`conversations_user_id_idx`) — no
+other indexes. RLS is enabled with four fail-closed policies, each scoped to `auth.uid() = user_id`;
+the `insert` (and `update`) policy gates the written row with `with check`, so forged ownership is
+rejected by the database. The schema lives in
+[`supabase/migrations/0002_create_conversations.sql`](../../supabase/migrations/0002_create_conversations.sql);
+`app/conversations.py` holds only the `Conversation` row type for future type-safe code. No
+conversation endpoint exists — the API surface is still `GET /health` + `GET /me`.
+
 `GET /me` is the single endpoint that proves the bridge: it requires a valid authenticated user
 (`require_authenticated_user`), resolves that user's profile, and returns
 `{user_id, created_at, updated_at}` — no tokens, passwords, credentials, or database internals. Identity
@@ -175,6 +190,7 @@ apps/api/
 │   ├── __init__.py
 │   ├── auth.py           # authenticated-identity boundary (verified token → user)
 │   ├── config.py         # centralized settings (AGENTSCHAT_API_*)
+│   ├── conversations.py  # conversation row type only (no endpoints yet)
 │   ├── logging_config.py # central logging setup (stdlib only, LOG_FORMAT)
 │   ├── profiles.py       # profile store + lookup (verified identity → profile row)
 │   ├── supabase_client.py # backend Supabase boundary (service-role key, server-only)
@@ -182,6 +198,7 @@ apps/api/
 ├── tests/
 │   ├── test_auth.py
 │   ├── test_config.py
+│   ├── test_conversations.py
 │   ├── test_cors.py
 │   ├── test_error_handling.py
 │   ├── test_health.py

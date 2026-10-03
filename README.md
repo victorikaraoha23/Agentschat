@@ -68,8 +68,9 @@ AgentsChat application code:
 - `apps/api/` — the FastAPI backend/API: `GET /health`, the authentication boundary
   (`AuthenticatedUser`, `require_authenticated_user`), and `GET /me`, which resolves the signed-in user's
   profile from `public.profiles`; see [`apps/api/README.md`](./apps/api/README.md) for commands.
-- `supabase/` — versioned SQL migrations for the application database (currently the `profiles` table and
-  its Row Level Security policies); see [`supabase/README.md`](./supabase/README.md).
+- `supabase/` — versioned SQL migrations for the application database (the `profiles` table and the
+  `conversations` table, each with Row Level Security policies); see
+  [`supabase/README.md`](./supabase/README.md).
 
 Each application is added by the task that builds it, together with its own tooling (Node/TypeScript for
 the web application, Python for the API). **No monorepo framework is used**, and the Python backend is not
