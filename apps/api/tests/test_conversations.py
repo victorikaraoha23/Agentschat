@@ -4,13 +4,15 @@ These tests assert the migration file in the repository (not a remote schema)
 plus the minimal backend domain type. RLS behavior itself cannot run here —
 there is no live Postgres — so it is verified by reading the policy text, the
 strongest deterministic check available without a database. The one exception
-is the route-surface check, which guards that Task 5.2 added creation and
-nothing beyond it.
+is the route-surface check, which guards that Tasks 5.2–5.3 added conversation
+creation and retrieval and nothing beyond them.
 """
 
 from pathlib import Path
+from uuid import UUID
 
 import pytest
+from pydantic import ValidationError
 from fastapi.testclient import TestClient
 
 from app.conversations import Conversation
@@ -124,12 +126,12 @@ def test_conversation_model_parses_a_row() -> None:
 
     assert conversation.title is None
     assert str(conversation.id) == "123e4567-e89b-12d3-a456-426614174000"
-    assert conversation.user_id == "123e4567-e89b-12d3-a456-426614174000"
+    assert conversation.user_id == UUID("123e4567-e89b-12d3-a456-426614174000")
 
 
 def test_conversation_model_rejects_malformed_rows() -> None:
     """Malformed ids fail validation rather than flowing onward."""
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         Conversation.model_validate(
             {
                 "id": "not-a-uuid",
@@ -141,8 +143,8 @@ def test_conversation_model_rejects_malformed_rows() -> None:
         )
 
 
-def test_conversation_surface_is_creation_only() -> None:
-    """One creation route exists and nothing more — no speculative verbs."""
+def test_conversation_surface_is_creation_and_retrieval_only() -> None:
+    """The collection is POST + GET, plus one GET by id — no other verb yet."""
     routes = {
         (route.path, method)
         for route in app.routes
@@ -153,7 +155,17 @@ def test_conversation_surface_is_creation_only() -> None:
     assert "/health" in {path for path, _ in routes}
     assert "/me" in {path for path, _ in routes}
     assert ("/conversations", "POST") in routes
-    assert [method for path, method in routes if path == "/conversations"] == ["POST"]
+    assert ("/conversations", "GET") in routes
+    assert ("/conversations/{conversation_id}", "GET") in routes
+    assert sorted(method for path, method in routes if path == "/conversations") == [
+        "GET",
+        "POST",
+    ]
+    assert [
+        method for path, method in routes if path == "/conversations/{conversation_id}"
+    ] == ["GET"]
+    # Task 5.4 owns modification and deletion; nothing may appear here early.
+    assert not {method for _, method in routes} & {"PATCH", "PUT", "DELETE"}
     assert not any(path.startswith("/chats") for path, _ in routes)
 
 
@@ -163,4 +175,3 @@ def test_app_starts_with_conversation_module_importable() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "healthy"}
-

@@ -7,6 +7,8 @@ identity the Task 3.2 dependency resolves — never from request data.
 
 from __future__ import annotations
 
+from uuid import UUID
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -302,7 +304,7 @@ def test_insert_payload_names_caller_and_columns() -> None:
     assert table.name == "conversations"
     assert table.payload == {"user_id": USER_ID, "title": "hello"}
     assert table.selected == ("id", "user_id", "title", "created_at", "updated_at")
-    assert created.user_id == USER_ID
+    assert created.user_id == UUID(USER_ID)
     assert created.title == "hello"
 
 
@@ -314,4 +316,3 @@ def test_insert_returning_no_row_is_a_safe_create_error() -> None:
         make_store(table).create(USER_ID, "hello")
 
     assert table.payload == {"user_id": USER_ID, "title": "hello"}
-

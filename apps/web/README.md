@@ -22,7 +22,7 @@ Run from `apps/web/`:
 | `npm run start` | Serve the production build |
 | `npm run lint` | ESLint (`eslint.config.mjs`, `eslint-config-next`) |
 | `npm run typecheck` | `next typegen && tsc --noEmit` |
-| `npm test` | Node's built-in test runner (`node --test`) for the API-request, auth, and profile modules |
+| `npm test` | Node's built-in test runner (`node --test`) for the API-request, auth, profile, and conversation modules |
 
 ## Configuration
 
@@ -37,13 +37,16 @@ values are compiled into the browser bundle (`apps/web/.env.example` documents t
 
 No `.env` file is needed: the defaults run locally without Supabase. The app reaches the API through
 three small modules — `app/health-api.ts` (`GET /health`), `lib/profile-api.ts` (`GET /me`), and
-`lib/conversations-api.ts` (`POST /conversations`) — each of which builds the request URL from
-`lib/api-base-url.ts`, applies a five-second deadline, checks the HTTP status, validates the response
-shape and returns a typed result. Failures are categorised so the UI can tell them
-apart: `network` (unreachable or timed out), `http` (non-success status, reported by status code only),
-`invalid-response` (malformed body or unexpected shape) and `unexpected` (anything else). The message shown
-to users is always these modules' own text — never a raw server body, stack trace, or error object — and the
-functions never throw, so a misbehaving API produces a visible failure state instead of crashing the page.
+`lib/conversations-api.ts` (create, list, and read conversations) — each of which builds the request
+URL from `lib/api-base-url.ts`, applies a five-second deadline, checks the HTTP status, validates the
+response shape and returns a typed result. Failures are categorised so the UI can tell them
+apart: `unauthenticated` (no usable session, or the API rejected the token), `invalid-input` (the API
+refused the request — an overlong title or a malformed id), `not-found` (the conversation does not
+exist), `network` (unreachable or timed out), `http` (non-success status, reported by status code
+only), `invalid-response` (malformed body or unexpected shape) and `unexpected` (anything else). The
+message shown to users is always these modules' own text — never a raw server body, stack trace, or
+error object — and the functions never throw, so a misbehaving API produces a visible failure state
+instead of crashing the page.
 
 ## Supabase
 
@@ -75,16 +78,26 @@ header (brand, navigation, sign-out) with the profile confirmation below.
   signed-in user. `getCurrentSession` separates `unconfigured` and `error` from `unauthenticated`, so a
   broken check never looks like "signed out".
 - None of this is authorization: the API's authenticated endpoints (`GET /me`, which proves the identity →
-  profile bridge, and `POST /conversations`, which creates a row the caller owns) decide everything
+  profile bridge, and the conversation endpoints — `POST /conversations`, `GET /conversations`, and
+  `GET /conversations/{conversation_id}` — which create and read rows the caller owns) decide everything
   themselves, and the browser decides nothing about what a user may do.
 
-## Conversation creation
+## Conversations
 
-`lib/conversations-api.ts` (`createConversation`, Task 5.2) posts `{title?}` to `POST /conversations`
-with the session's bearer token — never a user id, because the API derives ownership from the token
-it verifies. Results are typed (`unauthenticated` / `invalid-input` / `network` / `http` /
-`invalid-response` / `unexpected`) with fixed messages; raw bodies never reach the UI. No product UI
-uses it yet — it exists so tests and the next tasks have a typed creation path.
+`lib/conversations-api.ts` (Tasks 5.2–5.3) is the typed, never-throwing boundary for the three
+conversation requests, each sent with the session's bearer token — never a user id, because the API
+derives ownership from the token it verifies:
+
+- `createConversation` posts `{title?}` to `POST /conversations`.
+- `listConversations` requests `GET /conversations` and returns the caller's conversations in the
+  API's order (most recently updated first), or an empty array when there are none.
+- `getConversation` requests `GET /conversations/{conversation_id}` and answers `not-found` for a
+  conversation that does not exist — or that belongs to someone else, because the API reports both
+  exactly the same way and this module deliberately does not tell them apart.
+
+Results are typed (`unauthenticated` / `invalid-input` / `not-found` / `network` / `http` /
+`invalid-response` / `unexpected`) with fixed messages of our own; raw bodies never reach the UI.
+No product UI uses them yet — they exist so tests and the next tasks have a typed conversation path.
 
 ## Profile check
 
@@ -197,6 +210,8 @@ apps/web/
 │   ├── api-base-url.ts          # the single read of NEXT_PUBLIC_API_URL
 │   ├── auth.ts                  # the only module that talks to Supabase Auth
 │   ├── auth.test.ts             # node:test coverage for that module
+│   ├── conversations-api.ts      # creates, lists, and reads conversations (typed results)
+│   ├── conversations-api.test.ts # node:test coverage for that module
 │   ├── profile-api.ts           # calls GET /me with the session's token
 │   ├── profile-api.test.ts      # node:test coverage for that module
 │   ├── supabase-client.ts       # browser Supabase client (public URL + anon key only)

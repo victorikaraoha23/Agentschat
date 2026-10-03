@@ -1,7 +1,8 @@
 # Active Context
 
-- **Date:** 2026-10-03 (Task 5.2 session: Conversation Creation). Checkout branch `update`.
-- **Current task:** Task 5.2 (Conversation Creation) — implement `POST /conversations`.
+- **Date:** 2026-10-03 (Task 5.3 session: Conversation Retrieval). Checkout branch `update`.
+- **Current task:** Task 5.3 (Conversation Retrieval) — implement `GET /conversations` and
+  `GET /conversations/{conversation_id}`.
 - **What was done:**
   - **Task 0.1 (2026-09-22):** rewrote root `AGENTS.md` as the AgentsChat engineering constitution
     (mission, separation of concerns, dependency direction, simplicity, atomic dev, type safety, API,
@@ -128,6 +129,24 @@
     throws, and returns a typed result (`unauthenticated`/`invalid-input`/`network`/`http`/
     `invalid-response`/`unexpected`) with fixed messages; `lib/conversations-api.test.ts` (7 tests) and the
     `test` script updated. No product UI uses it yet.
+  - **Task 5.3 (2026-10-03):** conversation retrieval. Backend: `GET /conversations` and
+    `GET /conversations/{conversation_id}`, both behind `require_authenticated_user` and both scoped in
+    the query itself to the verified `user_id` (`eq("user_id", ...)`) — the service-role client bypasses
+    RLS, so the store filter is the ownership boundary. The list answers `{"items": [...]}` ordered by
+    `updated_at` descending with `id` descending as a deterministic tiebreak; the single read validates
+    the path id as a UUID (`422`) and uses `maybe_single()`, so a missing conversation and someone
+    else's conversation both return `404 {"detail": "Conversation not found."}` — indistinguishable by
+    design. Store failures map to fixed `503` details (`The conversations could not be read.` /
+    `The conversation could not be read.`); `app/conversations.py` gained the read Protocols,
+    `list_for_user` and `get_for_user`, plus `CONVERSATION_COLUMNS` shared by every statement.
+    Frontend: `lib/conversations-api.ts` gained `listConversations` and `getConversation` with the same
+    never-throwing typed-result pattern (`not-found` added to the reason union, per-operation fixed
+    messages, 5 s deadline, `GET` carries only the bearer token — never a user id). Tests: new
+    `tests/test_conversation_retrieval.py` (23 tests: endpoints + store-level ownership, the
+    indistinguishable 404s, deterministic ordering, empty list, failure mapping); the route-surface test
+    now asserts `[GET, POST]` on `/conversations` and `[GET]` on the detail route with no
+    `PATCH/PUT/DELETE`; `lib/conversations-api.test.ts` grew to 23 tests (16 new for list/read).
+    Docs updated (root `README.md`, both app READMEs). No UI, mutation, message, or Hermes work.
 - **Open questions / pending user input:**
   - The root `package.json` npm workspace glob (`apps/*`) still matches `apps/web`. Task 1.1 decided the app is
     an independent package (`npm install --workspaces=false`); narrowing the glob remains an explicitly scoped
