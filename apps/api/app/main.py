@@ -1,18 +1,24 @@
-"""AgentsChat FastAPI application: minimal foundation with a health check."""
+"""AgentsChat FastAPI application: health check, identity, and conversations."""
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from httpx import HTTPError
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from supabase import PostgrestAPIError, SupabaseException
 
 from app.auth import AuthenticatedUser, require_authenticated_user
-from app.config import get_settings
+from app.config import Settings, get_settings
+from app.conversations import (
+    Conversation,
+    ConversationCreateError,
+    SupabaseConversationStore,
+)
 from app.logging_config import configure_logging, logger
 from app.profiles import (
     ProfileRowNotFoundError,
@@ -72,7 +78,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(DEV_ALLOWED_ORIGINS),
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -104,6 +110,134 @@ app.add_exception_handler(Exception, unhandled_exception_handler)
 def read_health() -> HealthResponse:
     """Report that the API process is up and serving requests."""
     return HealthResponse(status="healthy")
+
+
+#: Longest conversation title the API stores. Long enough for a human-written
+#: label, short enough to keep rows and future list views predictable.
+MAX_CONVERSATION_TITLE_LENGTH = 200
+
+
+class CreateConversationRequest(BaseModel):
+    """Body of POST /conversations: an optional title, nothing else.
+
+    `user_id` is deliberately absent: ownership always comes from the
+    authenticated identity, so a client field by that name must never control
+    it. Pydantic ignores unknown fields by default, which means a forged
+    `user_id` in the body is dropped before the handler ever sees it.
+    """
+
+    title: str | None = Field(default=None, max_length=MAX_CONVERSATION_TITLE_LENGTH)
+
+
+class ConversationListResponse(BaseModel):
+    """Body of GET /conversations: the caller's own conversations, named.
+
+    A wrapped collection rather than a bare array, so the response says what it
+    contains and can gain fields without becoming a differently shaped payload.
+    """
+
+    items: list[Conversation]
+
+
+#: Answer for an id that does not exist *or* is not the caller's — deliberately
+#: the same message, so a response can never confirm that someone else's
+#: conversation exists (root AGENTS.md §10).
+CONVERSATION_NOT_FOUND_DETAIL = "Conversation not found."
+
+#: Answer when the read itself failed (Supabase unconfigured, unreachable, or
+#: erroring). Fixed text: no SQL, provider payload, or internal detail.
+CONVERSATION_LIST_UNAVAILABLE_DETAIL = "The conversations could not be read."
+CONVERSATION_UNAVAILABLE_DETAIL = "The conversation could not be read."
+
+
+def normalize_conversation_title(title: str | None) -> str | None:
+    """Trim a title; blank or missing becomes `None` (the schema default)."""
+    if title is None:
+        return None
+    stripped = title.strip()
+    return stripped if stripped != "" else None
+
+
+def get_conversation_store(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> SupabaseConversationStore:
+    """Provide the conversation store the creation endpoint writes through."""
+    return SupabaseConversationStore(settings)
+
+
+@app.post("/conversations", response_model=Conversation, status_code=status.HTTP_201_CREATED)
+def create_conversation(
+    body: CreateConversationRequest,
+    user: Annotated[AuthenticatedUser, Depends(require_authenticated_user)],
+    store: Annotated[SupabaseConversationStore, Depends(get_conversation_store)],
+) -> Conversation:
+    """Create one conversation owned by the verified caller and return it.
+
+    Ownership is the caller's verified `user_id` — never a client-supplied
+    value. The database RLS `insert` policy remains the final boundary.
+    """
+    try:
+        return store.create(user.user_id, normalize_conversation_title(body.title))
+    except ConversationCreateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The conversation could not be created.",
+        ) from exc
+    except (PostgrestAPIError, SupabaseException, SupabaseNotConfiguredError, HTTPError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The conversation could not be created.",
+        ) from exc
+
+
+@app.get("/conversations", response_model=ConversationListResponse)
+def list_conversations(
+    user: Annotated[AuthenticatedUser, Depends(require_authenticated_user)],
+    store: Annotated[SupabaseConversationStore, Depends(get_conversation_store)],
+) -> ConversationListResponse:
+    """Return the verified caller's conversations, most recently updated first.
+
+    Identity comes from the Task 3.2 dependency and there is no `user_id`
+    parameter to pass: the store scopes the query to that identity in the
+    database, so another user's rows are never read, let alone returned. An
+    account with no conversations is an empty collection, not an error.
+    """
+    try:
+        return ConversationListResponse(items=store.list_for_user(user.user_id))
+    except (PostgrestAPIError, SupabaseException, SupabaseNotConfiguredError, HTTPError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=CONVERSATION_LIST_UNAVAILABLE_DETAIL,
+        ) from exc
+
+
+@app.get("/conversations/{conversation_id}", response_model=Conversation)
+def read_conversation(
+    conversation_id: UUID,
+    user: Annotated[AuthenticatedUser, Depends(require_authenticated_user)],
+    store: Annotated[SupabaseConversationStore, Depends(get_conversation_store)],
+) -> Conversation:
+    """Return one conversation the caller owns, or a 404 it cannot read.
+
+    The path parameter is validated as a UUID before any query runs. Ownership
+    is the caller's verified identity — never a body, query, or path value — and
+    the store filters on it together with the id, so a conversation belonging to
+    someone else produces exactly the same response as one that does not exist.
+    """
+    try:
+        conversation = store.get_for_user(user.user_id, str(conversation_id))
+    except (PostgrestAPIError, SupabaseException, SupabaseNotConfiguredError, HTTPError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=CONVERSATION_UNAVAILABLE_DETAIL,
+        ) from exc
+
+    if conversation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=CONVERSATION_NOT_FOUND_DETAIL,
+        )
+    return conversation
 
 
 @app.get("/me", response_model=UserProfile)

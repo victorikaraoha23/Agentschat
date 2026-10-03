@@ -1,9 +1,9 @@
 # AgentsChat API
 
 The FastAPI backend/API for AgentsChat. **Foundation stage:** it starts locally and exposes a health
-check, plus a Supabase connectivity boundary (client creation only — no auth, no tables, no queries).
-It has no product functionality yet — no authentication, database models, Hermes
-integration, or business endpoints.
+check, the authentication boundary, the `GET /me` profile read, and the conversation endpoints —
+`POST /conversations`, `GET /conversations`, and `GET /conversations/{conversation_id}` — all backed by
+Supabase. It has no chat, agent execution, or Hermes integration yet.
 
 ## Requirements
 
@@ -53,7 +53,7 @@ automatically. To run without Supabase, omit both variables; empty or whitespace
 
 The health check is called **from the browser**: the Next.js app runs on `http://localhost:3000` while
 this API runs on `http://127.0.0.1:8000`, so the API allows exactly those two development origins
-(`DEV_ALLOWED_ORIGINS` in `app/main.py`) for `GET` requests. There is no wildcard origin, and no
+(`DEV_ALLOWED_ORIGINS` in `app/main.py`) for `GET` and `POST` requests. There is no wildcard origin, and no
 production origin is configured yet — that belongs to the task that introduces deployment. An unlisted
 origin receives no `access-control-allow-origin` header, so the browser blocks it.
 
@@ -107,8 +107,8 @@ runs exactly as before; `GET /health` is unaffected. No endpoint returns credent
 
 ## Authentication
 
-The backend recognizes an authenticated Supabase user, but **no endpoint requires authentication yet** and
-no user profile or application data exists. `app/auth.py` owns the boundary:
+The backend recognizes an authenticated Supabase user, and the profile and conversation endpoints
+require that identity through `require_authenticated_user`. `app/auth.py` owns the boundary:
 
 | Piece | Purpose |
 | --- | --- |
@@ -156,8 +156,8 @@ profile can never exist for an arbitrary UUID. The schema lives in
 - **Reading:** `app/profiles.py` (`SupabaseProfileStore`, `load_user_profile`,
   `ProfileRowNotFoundError`) resolves one row for the identity the Task 3.2 dependency already verified.
 
-`GET /me` is the single endpoint that proves the bridge: it requires a valid authenticated user
-(`require_authenticated_user`), resolves that user's profile, and returns
+`GET /me` is the endpoint that proves the identity → profile bridge: it requires a valid authenticated
+user (`require_authenticated_user`), resolves that user's profile, and returns
 `{user_id, created_at, updated_at}` — no tokens, passwords, credentials, or database internals. Identity
 never comes from the request body or query.
 
@@ -167,6 +167,54 @@ never comes from the request body or query.
 | Supabase unconfigured or unreachable | `503` | `{"detail": "Authentication is temporarily unavailable."}` |
 | Verified identity with no profile row | `500` | `{"detail": "The authenticated profile is unavailable."}` (a data-integrity signal, deliberately not a `404` callers could probe) |
 
+## Conversations
+
+`public.conversations` is the persistent conversation record — one row per user-owned conversation,
+keyed by a database-generated UUID, with `user_id uuid not null references public.profiles (id) on
+delete cascade` so the chain `auth.users → profiles → conversations` is explicit and a conversation
+can never name an arbitrary UUID. `title` is nullable with no default (no AI titles yet);
+`created_at`/`updated_at` are database-managed (`now()` defaults plus a before-update trigger
+mirroring migration 0001). The owner query pattern is indexed (`conversations_user_id_idx`) — no
+other indexes. RLS is enabled with four fail-closed policies, each scoped to `auth.uid() = user_id`;
+the `insert` (and `update`) policy gates the written row with `with check`, so forged ownership is
+rejected by the database. The schema lives in
+[`supabase/migrations/0002_create_conversations.sql`](../../supabase/migrations/0002_create_conversations.sql);
+`app/conversations.py` holds the `Conversation` row type plus the stores the endpoints need:
+`SupabaseConversationStore.create` (the write) and the owner-scoped reads `list_for_user` and
+`get_for_user`.
+
+`POST /conversations` creates one conversation for the verified caller and returns it with `201`.
+It requires authentication (`require_authenticated_user`); the body is `{title?}` only — there is
+no `user_id` field, so a forged owner id in the body is dropped by validation before the handler
+runs. Titles are optional, trimmed, blank-becomes-`None`, and capped at 200 characters (`422` past
+the limit). The store inserts exactly `(user_id, title)` through the service-role client and reads
+the row back; the RLS `insert` policy remains the final boundary.
+
+| Case | Status | Body |
+| --- | --- | --- |
+| No / malformed / rejected token | `401` | (as in `## Authentication` above) |
+| Overlong or mistyped title | `422` | FastAPI validation error |
+| Supabase unconfigured, unreachable, or empty insert result | `503` | `{"detail": "The conversation could not be created."}` |
+
+`GET /conversations` returns the verified caller's conversations wrapped as `{"items": [...]}`, most
+recently updated first with `id` descending as the tiebreak so the order is deterministic; an account
+with none returns `200` with an empty `items` list. `GET /conversations/{conversation_id}` returns one
+conversation the caller owns. Both endpoints require authentication, and both scope the query to the
+verified `user_id` in the database — the path id is never proof of ownership. A conversation belonging
+to someone else therefore answers exactly like one that does not exist (`404` with
+`{"detail": "Conversation not found."}`), so a caller cannot probe for other users' conversations. The
+path id must be a UUID (`422` before any query runs).
+
+| Case | Status | Body |
+| --- | --- | --- |
+| No / malformed / rejected token | `401` | (as in `## Authentication` above) |
+| Id that is not a UUID | `422` | FastAPI validation error |
+| Missing conversation, or one owned by someone else | `404` | `{"detail": "Conversation not found."}` |
+| Supabase unconfigured or unreachable (list) | `503` | `{"detail": "The conversations could not be read."}` |
+| Supabase unconfigured or unreachable (single read) | `503` | `{"detail": "The conversation could not be read."}` |
+
+No rename, delete, message, or runtime endpoint exists yet.
+
 ## Structure
 
 ```text
@@ -175,13 +223,17 @@ apps/api/
 │   ├── __init__.py
 │   ├── auth.py           # authenticated-identity boundary (verified token → user)
 │   ├── config.py         # centralized settings (AGENTSCHAT_API_*)
+│   ├── conversations.py  # conversation row type + create/list/get stores (Tasks 5.2–5.3)
 │   ├── logging_config.py # central logging setup (stdlib only, LOG_FORMAT)
 │   ├── profiles.py       # profile store + lookup (verified identity → profile row)
 │   ├── supabase_client.py # backend Supabase boundary (service-role key, server-only)
-│   └── main.py           # FastAPI application + GET /health + GET /me
+│   └── main.py           # FastAPI app: health, /me, and the conversation routes
 ├── tests/
 │   ├── test_auth.py
 │   ├── test_config.py
+│   ├── test_conversation_creation.py
+│   ├── test_conversation_retrieval.py
+│   ├── test_conversations.py
 │   ├── test_cors.py
 │   ├── test_error_handling.py
 │   ├── test_health.py

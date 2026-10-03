@@ -1,7 +1,8 @@
 # Active Context
 
-- **Date:** 2026-10-03 (Task 4.1 session: Application Shell). Checkout branch `update`.
-- **Current task:** Task 4.1 (Application Shell) — implement the authenticated shell at `/app`.
+- **Date:** 2026-10-03 (Task 5.3 session: Conversation Retrieval). Checkout branch `update`.
+- **Current task:** Task 5.3 (Conversation Retrieval) — implement `GET /conversations` and
+  `GET /conversations/{conversation_id}`.
 - **What was done:**
   - **Task 0.1 (2026-09-22):** rewrote root `AGENTS.md` as the AgentsChat engineering constitution
     (mission, separation of concerns, dependency direction, simplicity, atomic dev, type safety, API,
@@ -109,6 +110,43 @@
     `test` script covers all three files; `apps/web/.env.example` gained the two public vars. Tests:
     `tests/test_supabase.py` (7 tests: defaults, pair loading, half-pair rejection, clear missing error,
     construction, unconfigured lifespan + /health). No page uses the browser client yet.
+  - **Task 5.2 (2026-10-03):** conversation creation. Backend: `POST /conversations`
+    (`response_model=Conversation`, `201`) with `CreateConversationRequest` (`title` optional, max 200 —
+    `MAX_CONVERSATION_TITLE_LENGTH`), `normalize_conversation_title` (trimmed, blank → `None`), the
+    `get_conversation_store` dependency and a thin handler that delegates to `ConversationStore.create`
+    with the verified `user.user_id`. Ownership is never read from the body — `user_id` is absent from the
+    request model, so a forged field is dropped by validation. `app/conversations.py` gained the
+    `ConversationStore` protocol, `SupabaseConversationStore` (single-row insert of exactly
+    `(user_id, title)` through the service-role client, columns read back, `ConversationCreateError`) and
+    narrow `Protocol` seams mirroring the client chain. `ConversationCreateError`,
+    `PostgrestAPIError`/`SupabaseException`/`SupabaseNotConfiguredError`/`HTTPError` all map to a fixed
+    `503 {"detail": "The conversation could not be created."}`; invalid auth stays `401` and invalid input
+    `422`. CORS now allows `POST`. 11 new tests in `tests/test_conversation_creation.py` (401 paths, title
+    validation and normalization, ownership from the verified identity for two different users, forged
+    body `user_id`, store failure, and the insert payload/columns); the Task 5.1 route-surface test now
+    asserts `/conversations` exposes exactly `POST`. Frontend: `lib/conversations-api.ts`
+    (`createConversation`) posts `{title?}` with the session's bearer token (never a user id), never
+    throws, and returns a typed result (`unauthenticated`/`invalid-input`/`network`/`http`/
+    `invalid-response`/`unexpected`) with fixed messages; `lib/conversations-api.test.ts` (7 tests) and the
+    `test` script updated. No product UI uses it yet.
+  - **Task 5.3 (2026-10-03):** conversation retrieval. Backend: `GET /conversations` and
+    `GET /conversations/{conversation_id}`, both behind `require_authenticated_user` and both scoped in
+    the query itself to the verified `user_id` (`eq("user_id", ...)`) — the service-role client bypasses
+    RLS, so the store filter is the ownership boundary. The list answers `{"items": [...]}` ordered by
+    `updated_at` descending with `id` descending as a deterministic tiebreak; the single read validates
+    the path id as a UUID (`422`) and uses `maybe_single()`, so a missing conversation and someone
+    else's conversation both return `404 {"detail": "Conversation not found."}` — indistinguishable by
+    design. Store failures map to fixed `503` details (`The conversations could not be read.` /
+    `The conversation could not be read.`); `app/conversations.py` gained the read Protocols,
+    `list_for_user` and `get_for_user`, plus `CONVERSATION_COLUMNS` shared by every statement.
+    Frontend: `lib/conversations-api.ts` gained `listConversations` and `getConversation` with the same
+    never-throwing typed-result pattern (`not-found` added to the reason union, per-operation fixed
+    messages, 5 s deadline, `GET` carries only the bearer token — never a user id). Tests: new
+    `tests/test_conversation_retrieval.py` (23 tests: endpoints + store-level ownership, the
+    indistinguishable 404s, deterministic ordering, empty list, failure mapping); the route-surface test
+    now asserts `[GET, POST]` on `/conversations` and `[GET]` on the detail route with no
+    `PATCH/PUT/DELETE`; `lib/conversations-api.test.ts` grew to 23 tests (16 new for list/read).
+    Docs updated (root `README.md`, both app READMEs). No UI, mutation, message, or Hermes work.
 - **Open questions / pending user input:**
   - The root `package.json` npm workspace glob (`apps/*`) still matches `apps/web`. Task 1.1 decided the app is
     an independent package (`npm install --workspaces=false`); narrowing the glob remains an explicitly scoped
@@ -116,8 +154,10 @@
   - Should `pyproject.toml`'s `readme = "README.md"` be repointed to `docs/hermes-runtime.md` (moved
     Hermes README), and should `apps/desktop/README.md`'s `../../README.md` link follow it?
 - **Next steps:**
-  - Start Task 2.3 only on explicit instruction; read the root `AGENTS.md`, `apps/api/README.md`, and
+  - Start the next task only on explicit instruction; read the root `AGENTS.md`, `apps/api/README.md`, and
     `apps/web/README.md` first.
+  - `memory-bank/` notes are behind: Tasks 3.3, 4.1, 4.2 and 5.1 are recorded in git history and the app
+    READMEs but not in the "What was done" list here.
   - On code changes: `scripts/run_tests.sh` for Hermes source; keep prompt-caching and profile-scope
     invariants.
 - **Key files for orientation:** `AGENTS.md` → `README.md` → `docs/hermes-runtime.md` → `memory-bank/*`;

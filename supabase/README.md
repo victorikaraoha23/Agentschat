@@ -15,3 +15,4 @@ in the migration's header comment.
 | File | Purpose |
 | --- | --- |
 | `migrations/0001_create_profiles.sql` | `public.profiles` (id = `auth.users.id`), RLS, creation trigger |
+| `migrations/0002_create_conversations.sql` | `public.conversations` (uuid id, `user_id` → `profiles.id`), RLS, owner index |
