@@ -1,11 +1,11 @@
 /**
- * Conversation requests against the AgentsChat API (Tasks 5.2–5.3).
+ * Conversation requests against the AgentsChat API (Tasks 5.2–5.4).
  *
  * The browser asks the backend to create one conversation for the signed-in
- * user, to list the conversations that user owns, and to read one of them by id.
- * Ownership comes from the session's access token, which the backend verifies —
- * this module never sends a user id, so there is nothing to forge and no user id
- * appears in a URL either.
+ * user, to list the conversations that user owns, to read one of them by id,
+ * and to rename or delete one of them. Ownership comes from the session's
+ * access token, which the backend verifies — this module never sends a user
+ * id, so there is nothing to forge and no user id appears in a URL either.
  *
  * Like the other API modules, nothing here throws: every failure is a typed
  * result carrying a fixed message of our own.
@@ -58,6 +58,14 @@ export type ConversationListResult =
   | { ok: true; conversations: Conversation[] }
   | { ok: false; reason: ConversationFailureReason; message: string; statusCode?: number };
 
+/**
+ * The outcome of a deletion: success carries no conversation, because
+ * `DELETE` answers 204 No Content — there is nothing left to return.
+ */
+export type ConversationDeleteResult =
+  | { ok: true }
+  | { ok: false; reason: ConversationFailureReason; message: string; statusCode?: number };
+
 const CREATE_UNREADABLE_SESSION_MESSAGE =
   "Your conversation could not be created: sign in again.";
 const CREATE_REJECTED_MESSAGE =
@@ -81,6 +89,21 @@ const READ_TIMEOUT_MESSAGE = "Loading your conversation timed out.";
 const READ_UNEXPECTED_MESSAGE = "An unexpected error occurred while loading your conversation.";
 const READ_INVALID_ID_MESSAGE = "That conversation id is not valid.";
 const NOT_FOUND_MESSAGE = "That conversation could not be found.";
+
+const RENAME_UNREADABLE_SESSION_MESSAGE =
+  "Your conversation could not be renamed: sign in again.";
+const RENAME_REJECTED_MESSAGE =
+  "Your conversation could not be renamed: your session is not valid.";
+const RENAME_INVALID_INPUT_MESSAGE = "That conversation id or title is not valid.";
+const RENAME_TIMEOUT_MESSAGE = "Renaming your conversation timed out.";
+const RENAME_UNEXPECTED_MESSAGE = "An unexpected error occurred while renaming your conversation.";
+
+const DELETE_UNREADABLE_SESSION_MESSAGE =
+  "Your conversation could not be deleted: sign in again.";
+const DELETE_REJECTED_MESSAGE =
+  "Your conversation could not be deleted: your session is not valid.";
+const DELETE_TIMEOUT_MESSAGE = "Deleting your conversation timed out.";
+const DELETE_UNEXPECTED_MESSAGE = "An unexpected error occurred while deleting your conversation.";
 
 // Failures every request in this module shares, so they read the same way
 // wherever they surface.
@@ -433,6 +456,206 @@ export async function getConversation(
     return { ok: true, conversation: toConversation(body) };
   } catch {
     return { ok: false, reason: "unexpected", message: READ_UNEXPECTED_MESSAGE };
+  } finally {
+    clearTimeout(deadline);
+  }
+}
+
+/** Request options; `conversationId` is an id this API returned earlier. */
+export interface RenameConversationRequestOptions {
+  conversationId: string;
+  /** The new title. The API trims it and stores a blank title as none. */
+  title: string;
+  /** Session access token. Omit to read it from the current session. */
+  accessToken?: string | null;
+  fetchImpl?: FetchLike;
+}
+
+/**
+ * Request `PATCH /conversations/{conversation_id}` with the session's access
+ * token and classify the outcome.
+ *
+ * Only the bearer token and the new title are sent — never a user id — so
+ * ownership is decided server-side from the verified token. A conversation
+ * belonging to someone else answers exactly like one that does not exist
+ * (`not-found`), and this module must not tell them apart. The function never
+ * throws.
+ */
+export async function renameConversation(
+  options: RenameConversationRequestOptions,
+): Promise<ConversationResult> {
+  const token =
+    options.accessToken !== undefined ? options.accessToken : await getAccessToken();
+  if (token === null || token === "") {
+    return {
+      ok: false,
+      reason: "unauthenticated",
+      message: RENAME_UNREADABLE_SESSION_MESSAGE,
+    };
+  }
+
+  const fetchImpl = options.fetchImpl ?? defaultFetch;
+  const base = API_BASE_URL.replace(/\/+$/, "");
+  const url = `${base}/conversations/${encodeURIComponent(options.conversationId)}`;
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    let response: Response;
+    try {
+      response = await fetchImpl(url, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ title: options.title }),
+        signal: controller.signal,
+      });
+    } catch {
+      return controller.signal.aborted
+        ? { ok: false, reason: "network", message: RENAME_TIMEOUT_MESSAGE }
+        : { ok: false, reason: "network", message: REQUEST_FAILED_MESSAGE };
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        ok: false,
+        reason: "unauthenticated",
+        message: RENAME_REJECTED_MESSAGE,
+        statusCode: response.status,
+      };
+    }
+    if (response.status === 404) {
+      return { ok: false, reason: "not-found", message: NOT_FOUND_MESSAGE, statusCode: 404 };
+    }
+    if (response.status === 422) {
+      // A PATCH 422 means the path id or the title failed validation. The id
+      // always comes from an earlier response here, so the message names what
+      // this request actually carries.
+      return {
+        ok: false,
+        reason: "invalid-input",
+        message: RENAME_INVALID_INPUT_MESSAGE,
+        statusCode: 422,
+      };
+    }
+    if (!response.ok) {
+      return {
+        ok: false,
+        reason: "http",
+        message: `The API responded with HTTP ${response.status}.`,
+        statusCode: response.status,
+      };
+    }
+
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      if (controller.signal.aborted) {
+        return { ok: false, reason: "network", message: RENAME_TIMEOUT_MESSAGE };
+      }
+      return { ok: false, reason: "invalid-response", message: INVALID_JSON_MESSAGE };
+    }
+
+    if (!isConversationPayload(body)) {
+      return { ok: false, reason: "invalid-response", message: NO_CONVERSATION_MESSAGE };
+    }
+
+    return { ok: true, conversation: toConversation(body) };
+  } catch {
+    return { ok: false, reason: "unexpected", message: RENAME_UNEXPECTED_MESSAGE };
+  } finally {
+    clearTimeout(deadline);
+  }
+}
+
+/** Request options; `conversationId` is an id this API returned earlier. */
+export interface DeleteConversationRequestOptions {
+  conversationId: string;
+  /** Session access token. Omit to read it from the current session. */
+  accessToken?: string | null;
+  fetchImpl?: FetchLike;
+}
+
+/**
+ * Request `DELETE /conversations/{conversation_id}` with the session's access
+ * token and classify the outcome.
+ *
+ * Only the bearer token is sent — never a user id — so ownership is decided
+ * server-side from the verified token. A conversation belonging to someone
+ * else answers exactly like one that does not exist (`not-found`), and this
+ * module must not tell them apart. Success is a bare `ok: true` because the
+ * API answers 204 No Content. The function never throws.
+ */
+export async function deleteConversation(
+  options: DeleteConversationRequestOptions,
+): Promise<ConversationDeleteResult> {
+  const token =
+    options.accessToken !== undefined ? options.accessToken : await getAccessToken();
+  if (token === null || token === "") {
+    return {
+      ok: false,
+      reason: "unauthenticated",
+      message: DELETE_UNREADABLE_SESSION_MESSAGE,
+    };
+  }
+
+  const fetchImpl = options.fetchImpl ?? defaultFetch;
+  const base = API_BASE_URL.replace(/\/+$/, "");
+  const url = `${base}/conversations/${encodeURIComponent(options.conversationId)}`;
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    let response: Response;
+    try {
+      response = await fetchImpl(url, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      });
+    } catch {
+      return controller.signal.aborted
+        ? { ok: false, reason: "network", message: DELETE_TIMEOUT_MESSAGE }
+        : { ok: false, reason: "network", message: REQUEST_FAILED_MESSAGE };
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        ok: false,
+        reason: "unauthenticated",
+        message: DELETE_REJECTED_MESSAGE,
+        statusCode: response.status,
+      };
+    }
+    if (response.status === 404) {
+      return { ok: false, reason: "not-found", message: NOT_FOUND_MESSAGE, statusCode: 404 };
+    }
+    if (response.status === 422) {
+      // Nothing but the id travels in this request, so a 422 can only be an
+      // invalid path id.
+      return {
+        ok: false,
+        reason: "invalid-input",
+        message: READ_INVALID_ID_MESSAGE,
+        statusCode: 422,
+      };
+    }
+    if (!response.ok) {
+      return {
+        ok: false,
+        reason: "http",
+        message: `The API responded with HTTP ${response.status}.`,
+        statusCode: response.status,
+      };
+    }
+
+    // 204 No Content: there is no body to parse and no shape to verify.
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: "unexpected", message: DELETE_UNEXPECTED_MESSAGE };
   } finally {
     clearTimeout(deadline);
   }

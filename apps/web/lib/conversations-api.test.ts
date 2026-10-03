@@ -1,15 +1,22 @@
 /**
- * Unit tests for the conversation boundary (Tasks 5.2–5.3).
+ * Unit tests for the conversation boundary (Tasks 5.2–5.4).
  *
  * `fetch` and the access token are injected, so no test touches the network
  * or Supabase. Every request carries only the bearer token — never a user id —
- * whether it creates a conversation, lists them, or reads one.
+ * whether it creates a conversation, lists them, reads one, renames one, or
+ * deletes one.
  */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { createConversation, getConversation, listConversations } from "./conversations-api.ts";
+import {
+  createConversation,
+  deleteConversation,
+  getConversation,
+  listConversations,
+  renameConversation,
+} from "./conversations-api.ts";
 
 const TOKEN = "session-access-token";
 
@@ -435,5 +442,252 @@ test("a response that is not a conversation is an invalid response", async () =>
     reason: "invalid-response",
     message: "The API response did not contain a conversation.",
   });
+});
+
+test("renaming sends PATCH with the title and returns the updated conversation", async () => {
+  let requestedUrl: string | undefined;
+  let method: string | undefined;
+  let authorization: string | undefined;
+  let sentBody: unknown;
+  const result = await renameConversation({
+    conversationId: CONVERSATION_BODY.id,
+    title: "renamed",
+    accessToken: TOKEN,
+    fetchImpl: async (url, init) => {
+      requestedUrl = url;
+      method = init?.method;
+      authorization = new Headers(init?.headers).get("Authorization") ?? undefined;
+      sentBody = JSON.parse(String(init?.body));
+      return jsonResponse({ ...CONVERSATION_BODY, title: "renamed" }, 200);
+    },
+  });
+
+  assert.match(requestedUrl ?? "", /\/conversations\/[^/]+$/);
+  assert.equal(method, "PATCH");
+  assert.equal(authorization, `Bearer ${TOKEN}`);
+  assert.deepEqual(sentBody, { title: "renamed" });
+  assert.equal(result.ok, true);
+  assert.equal(result.ok ? result.conversation.title : null, "renamed");
+});
+
+test("an unauthenticated rename is reported without fetching anything", async () => {
+  let called = false;
+  const result = await renameConversation({
+    conversationId: CONVERSATION_BODY.id,
+    title: "renamed",
+    accessToken: null,
+    fetchImpl: async () => {
+      called = true;
+      return jsonResponse(CONVERSATION_BODY, 200);
+    },
+  });
+
+  assert.equal(called, false);
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "unauthenticated",
+    message: "Your conversation could not be renamed: sign in again.",
+  });
+});
+
+test("a rejected session while renaming is unauthenticated, not generic", async () => {
+  const result = await renameConversation({
+    conversationId: CONVERSATION_BODY.id,
+    title: "renamed",
+    accessToken: TOKEN,
+    fetchImpl: async () => jsonResponse({ detail: "Authentication required." }, 401),
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "unauthenticated",
+    message: "Your conversation could not be renamed: your session is not valid.",
+    statusCode: 401,
+  });
+  assert.equal(JSON.stringify(result).includes("Authentication required."), false);
+});
+
+test("renaming a conversation the user cannot see is not-found", async () => {
+  const result = await renameConversation({
+    conversationId: CONVERSATION_BODY.id,
+    title: "renamed",
+    accessToken: TOKEN,
+    fetchImpl: async () => jsonResponse({ detail: "Conversation not found." }, 404),
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "not-found",
+    message: "That conversation could not be found.",
+    statusCode: 404,
+  });
+});
+
+test("an invalid rename is invalid-input with a fixed message", async () => {
+  const result = await renameConversation({
+    conversationId: CONVERSATION_BODY.id,
+    title: "x".repeat(201),
+    accessToken: TOKEN,
+    fetchImpl: async () =>
+      jsonResponse({ detail: "String should have at most 200 characters" }, 422),
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "invalid-input",
+    message: "That conversation id or title is not valid.",
+    statusCode: 422,
+  });
+  assert.equal(JSON.stringify(result).includes("String should"), false);
+});
+
+test("a server error while renaming reports the status and never the body", async () => {
+  const result = await renameConversation({
+    conversationId: CONVERSATION_BODY.id,
+    title: "renamed",
+    accessToken: TOKEN,
+    fetchImpl: async () =>
+      jsonResponse({ detail: "The conversation could not be updated." }, 503),
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "http",
+    message: "The API responded with HTTP 503.",
+    statusCode: 503,
+  });
+  assert.equal(JSON.stringify(result).includes("could not be updated"), false);
+});
+
+test("a network failure while renaming is a network result", async () => {
+  const result = await renameConversation({
+    conversationId: CONVERSATION_BODY.id,
+    title: "renamed",
+    accessToken: TOKEN,
+    fetchImpl: async () => {
+      throw new TypeError("fetch failed");
+    },
+  });
+
+  assert.deepEqual(result, { ok: false, reason: "network", message: "Request failed." });
+});
+
+test("deleting sends DELETE with the token and reports bare success", async () => {
+  let requestedUrl: string | undefined;
+  let method: string | undefined;
+  let authorization: string | undefined;
+  let sentBody: unknown;
+  const result = await deleteConversation({
+    conversationId: CONVERSATION_BODY.id,
+    accessToken: TOKEN,
+    fetchImpl: async (url, init) => {
+      requestedUrl = url;
+      method = init?.method;
+      authorization = new Headers(init?.headers).get("Authorization") ?? undefined;
+      sentBody = init?.body;
+      return new Response(null, { status: 204 });
+    },
+  });
+
+  assert.match(requestedUrl ?? "", /\/conversations\/[^/]+$/);
+  assert.equal(method, "DELETE");
+  assert.equal(authorization, `Bearer ${TOKEN}`);
+  assert.equal(sentBody, undefined);
+  assert.deepEqual(result, { ok: true });
+});
+
+test("an unauthenticated delete is reported without fetching anything", async () => {
+  let called = false;
+  const result = await deleteConversation({
+    conversationId: CONVERSATION_BODY.id,
+    accessToken: null,
+    fetchImpl: async () => {
+      called = true;
+      return new Response(null, { status: 204 });
+    },
+  });
+
+  assert.equal(called, false);
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "unauthenticated",
+    message: "Your conversation could not be deleted: sign in again.",
+  });
+});
+
+test("a rejected session while deleting is unauthenticated, not generic", async () => {
+  const result = await deleteConversation({
+    conversationId: CONVERSATION_BODY.id,
+    accessToken: TOKEN,
+    fetchImpl: async () => jsonResponse({ detail: "Authentication required." }, 401),
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "unauthenticated",
+    message: "Your conversation could not be deleted: your session is not valid.",
+    statusCode: 401,
+  });
+  assert.equal(JSON.stringify(result).includes("Authentication required."), false);
+});
+
+test("deleting a conversation the user cannot see is not-found", async () => {
+  const result = await deleteConversation({
+    conversationId: CONVERSATION_BODY.id,
+    accessToken: TOKEN,
+    fetchImpl: async () => jsonResponse({ detail: "Conversation not found." }, 404),
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "not-found",
+    message: "That conversation could not be found.",
+    statusCode: 404,
+  });
+});
+
+test("an invalid id on delete is invalid-input with a fixed message", async () => {
+  const result = await deleteConversation({
+    conversationId: "not-a-uuid",
+    accessToken: TOKEN,
+    fetchImpl: async () => jsonResponse({ detail: "Input should be a valid UUID" }, 422),
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "invalid-input",
+    message: "That conversation id is not valid.",
+    statusCode: 422,
+  });
+  assert.equal(JSON.stringify(result).includes("valid UUID"), false);
+});
+
+test("a server error while deleting reports the status and never the body", async () => {
+  const result = await deleteConversation({
+    conversationId: CONVERSATION_BODY.id,
+    accessToken: TOKEN,
+    fetchImpl: async () =>
+      jsonResponse({ detail: "The conversation could not be deleted." }, 503),
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "http",
+    message: "The API responded with HTTP 503.",
+    statusCode: 503,
+  });
+  assert.equal(JSON.stringify(result).includes("could not be deleted"), false);
+});
+
+test("a network failure while deleting is a network result", async () => {
+  const result = await deleteConversation({
+    conversationId: CONVERSATION_BODY.id,
+    accessToken: TOKEN,
+    fetchImpl: async () => {
+      throw new TypeError("fetch failed");
+    },
+  });
+
+  assert.deepEqual(result, { ok: false, reason: "network", message: "Request failed." });
 });
 

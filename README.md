@@ -9,14 +9,15 @@ execution dependency and which is not itself user-visible.
 
 ## Current status
 
-**Foundational development stage: the web application has signup/sign-in/sign-out, the API resolves authenticated users' AgentsChat profiles and lets a signed-in user create, list, and read conversations they own; no chat interface or agent execution exists beyond that.**
+**Foundational development stage: the web application has signup/sign-in/sign-out, the API resolves authenticated users' AgentsChat profiles and lets a signed-in user create, list, read, rename, and delete conversations they own; no chat interface or agent execution exists beyond that.**
 
 The repository contains the engineering constitution, the agent-runtime source that AgentsChat depends on,
 and the foundations of both applications (`apps/web`: signup, sign-in, sign-out, session detection over
 Supabase Auth, and a one-line profile confirmation; `apps/api`: `GET /health`, the authentication boundary,
 `GET /me`, which returns the signed-in user's profile, and the conversation endpoints —
-`POST /conversations`, `GET /conversations`, and `GET /conversations/{conversation_id}` — which create
-and read conversations owned by the signed-in user). The schema exists as versioned Supabase migrations
+`POST /conversations`, `GET /conversations`, `GET /conversations/{conversation_id}`,
+`PATCH /conversations/{conversation_id}`, and `DELETE /conversations/{conversation_id}` — which create,
+read, rename, and delete conversations owned by the signed-in user). The schema exists as versioned Supabase migrations
 (`supabase/migrations/`: a `profiles` table and a `conversations` table, each with Row Level Security).
 There is **no** chat interface, agent execution, or production deployment yet. Nothing described below as
 planned is implemented.
@@ -70,7 +71,8 @@ AgentsChat application code:
 - `apps/api/` — the FastAPI backend/API: `GET /health`, the authentication boundary
   (`AuthenticatedUser`, `require_authenticated_user`), `GET /me`, which resolves the signed-in user's
   profile from `public.profiles`, and the conversation endpoints — `POST /conversations`,
-  `GET /conversations`, and `GET /conversations/{conversation_id}` — which create and read conversations
+  `GET /conversations`, `GET /conversations/{conversation_id}`, `PATCH /conversations/{conversation_id}`,
+  and `DELETE /conversations/{conversation_id}` — which create, read, rename, and delete conversations
   owned by the verified caller; see [`apps/api/README.md`](./apps/api/README.md) for commands.
 - `supabase/` — versioned SQL migrations for the application database (the `profiles` table and the
   `conversations` table, each with Row Level Security policies); see
@@ -109,10 +111,11 @@ Notes for the `apps/*` applications:
 **Current stage — Stage 1: application foundation.** Governance, the Supabase connectivity boundary, and
 the authentication model are complete: the web application creates and uses Supabase Auth sessions, the API
 resolves the authenticated identity and their `profiles` row behind `GET /me`, and the schema now ships as
-versioned migrations for both `profiles` and `conversations`. Conversation **creation and retrieval** are
-in place (`POST /conversations`, `GET /conversations`, and `GET /conversations/{conversation_id}`, all
-scoped to the verified caller); renaming, deleting, and messaging in a conversation are not. No agent
-execution exists yet.
+versioned migrations for both `profiles` and `conversations`. Conversation **creation, retrieval,
+renaming, and deletion** are in place (`POST /conversations`, `GET /conversations`,
+`GET /conversations/{conversation_id}`, `PATCH /conversations/{conversation_id}`, and
+`DELETE /conversations/{conversation_id}`, all scoped to the verified caller); messaging in a
+conversation is not. No agent execution exists yet.
 
 High-level upcoming stages:
 

@@ -59,3 +59,22 @@ def test_preflight_allows_conversation_creation_from_dev_origin() -> None:
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
     assert "POST" in response.headers["access-control-allow-methods"]
+
+
+def test_preflight_allows_conversation_modification_from_dev_origin() -> None:
+    """PATCH and DELETE on the conversation detail path are reachable cross-origin."""
+    for method in ("PATCH", "DELETE"):
+        response = client.options(
+            "/conversations/223e4567-e89b-12d3-a456-426614174000",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": method,
+                "Access-Control-Request-Headers": "authorization,content-type",
+            },
+        )
+
+        assert response.status_code == 200
+        assert (
+            response.headers["access-control-allow-origin"] == "http://localhost:3000"
+        )
+        assert method in response.headers["access-control-allow-methods"]

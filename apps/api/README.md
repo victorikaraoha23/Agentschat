@@ -2,7 +2,8 @@
 
 The FastAPI backend/API for AgentsChat. **Foundation stage:** it starts locally and exposes a health
 check, the authentication boundary, the `GET /me` profile read, and the conversation endpoints —
-`POST /conversations`, `GET /conversations`, and `GET /conversations/{conversation_id}` — all backed by
+`POST /conversations`, `GET /conversations`, `GET /conversations/{conversation_id}`,
+`PATCH /conversations/{conversation_id}`, and `DELETE /conversations/{conversation_id}` — all backed by
 Supabase. It has no chat, agent execution, or Hermes integration yet.
 
 ## Requirements
@@ -53,7 +54,7 @@ automatically. To run without Supabase, omit both variables; empty or whitespace
 
 The health check is called **from the browser**: the Next.js app runs on `http://localhost:3000` while
 this API runs on `http://127.0.0.1:8000`, so the API allows exactly those two development origins
-(`DEV_ALLOWED_ORIGINS` in `app/main.py`) for `GET` and `POST` requests. There is no wildcard origin, and no
+(`DEV_ALLOWED_ORIGINS` in `app/main.py`) for `GET`, `POST`, `PATCH`, and `DELETE` requests. There is no wildcard origin, and no
 production origin is configured yet — that belongs to the task that introduces deployment. An unlisted
 origin receives no `access-control-allow-origin` header, so the browser blocks it.
 
@@ -181,7 +182,7 @@ rejected by the database. The schema lives in
 [`supabase/migrations/0002_create_conversations.sql`](../../supabase/migrations/0002_create_conversations.sql);
 `app/conversations.py` holds the `Conversation` row type plus the stores the endpoints need:
 `SupabaseConversationStore.create` (the write) and the owner-scoped reads `list_for_user` and
-`get_for_user`.
+`get_for_user`, plus the owner-scoped `rename_for_user` and `delete_for_user` writes.
 
 `POST /conversations` creates one conversation for the verified caller and returns it with `201`.
 It requires authentication (`require_authenticated_user`); the body is `{title?}` only — there is
@@ -213,7 +214,28 @@ path id must be a UUID (`422` before any query runs).
 | Supabase unconfigured or unreachable (list) | `503` | `{"detail": "The conversations could not be read."}` |
 | Supabase unconfigured or unreachable (single read) | `503` | `{"detail": "The conversation could not be read."}` |
 
-No rename, delete, message, or runtime endpoint exists yet.
+`PATCH /conversations/{conversation_id}` renames one conversation the caller owns. The body is
+`{"title": ...}` only — the same title rules as creation (trimmed, blank/`null` clears it, 200
+characters max, `422` past the limit), and a forged `user_id` is dropped exactly as on `POST`. It
+returns the updated conversation with `200`; `updated_at` is refreshed by the database's
+before-update trigger, never written by the application. Ownership is enforced the same way as the
+reads: the update statement filters on the verified `user_id` together with the id, so a foreign id
+matches nothing and answers the identical `404`.
+
+`DELETE /conversations/{conversation_id}` removes one conversation the caller owns and answers
+`204 No Content` on success, with the same owner-scoped statement and the same indistinguishable
+`404` for missing or foreign ids.
+
+| Case | Status | Body |
+| --- | --- | --- |
+| No / malformed / rejected token | `401` | (as in `## Authentication` above) |
+| Id that is not a UUID | `422` | FastAPI validation error |
+| Rename without a valid `title` (missing, mistyped, overlong) | `422` | FastAPI validation error |
+| Missing conversation, or one owned by someone else | `404` | `{"detail": "Conversation not found."}` |
+| Supabase unconfigured or unreachable (rename) | `503` | `{"detail": "The conversation could not be updated."}` |
+| Supabase unconfigured or unreachable (delete) | `503` | `{"detail": "The conversation could not be deleted."}` |
+
+No message, chat, or runtime endpoint exists yet.
 
 ## Structure
 
@@ -223,7 +245,7 @@ apps/api/
 │   ├── __init__.py
 │   ├── auth.py           # authenticated-identity boundary (verified token → user)
 │   ├── config.py         # centralized settings (AGENTSCHAT_API_*)
-│   ├── conversations.py  # conversation row type + create/list/get stores (Tasks 5.2–5.3)
+│   ├── conversations.py  # conversation row type + create/list/get/rename/delete stores (Tasks 5.2–5.4)
 │   ├── logging_config.py # central logging setup (stdlib only, LOG_FORMAT)
 │   ├── profiles.py       # profile store + lookup (verified identity → profile row)
 │   ├── supabase_client.py # backend Supabase boundary (service-role key, server-only)

@@ -1,6 +1,6 @@
-"""Conversation domain type and store (Tasks 5.1–5.3).
+"""Conversation domain type and store (Tasks 5.1–5.4).
 
-Schema-only foundation plus the reads and the single write the conversation
+Schema-only foundation plus the reads and writes the conversation
 endpoints need. :class:`Conversation` mirrors the ``public.conversations`` row
 shape from ``supabase/migrations/0002_create_conversations.sql`` so code
 converts verified rows into this model instead of passing untyped dicts.
@@ -106,11 +106,35 @@ class ConversationSelectQueryLike(Protocol):
         """Run the rows query against Supabase."""
 
 
+class ConversationWriteQueryLike(Protocol):
+    """The write chain both updates and deletes build: filter, then return rows.
+
+    An ``update`` or ``delete`` without a filter would apply to the whole table,
+    so both endpoints filter on the id *and* the verified owner before the
+    statement runs, then select the conversation columns back. Zero matched
+    rows surfaces as "no row" through ``maybe_single`` — the same observation
+    the reads make for a conversation that does not exist or is not the
+    caller's.
+    """
+
+    def eq(self, column: str, value: object) -> ConversationWriteQueryLike:
+        """Filter the write to one column value."""
+
+    def select(self, *columns: str) -> ConversationSelectQueryLike:
+        """Choose the columns the write returns and continue the read chain."""
+
+
 class ConversationTableLike(Protocol):
     """The table handle this module reads and writes through."""
 
     def insert(self, payload: dict[str, object]) -> ConversationInsertQueryLike:
         """Start an insert of one row payload."""
+
+    def update(self, payload: dict[str, object]) -> ConversationWriteQueryLike:
+        """Start an update of the rows later filters select."""
+
+    def delete(self) -> ConversationWriteQueryLike:
+        """Start a deletion of the rows later filters select."""
 
     def select(self, *columns: str) -> ConversationSelectQueryLike:
         """Start a column-scoped read of the table."""
@@ -134,6 +158,14 @@ class ConversationStore(Protocol):
 
     def get_for_user(self, user_id: str, conversation_id: str) -> Conversation | None:
         """Return one conversation owned by ``user_id``, or `None` when there is none."""
+
+    def rename_for_user(
+        self, user_id: str, conversation_id: str, title: str | None
+    ) -> Conversation | None:
+        """Set the title of one conversation owned by ``user_id``, or `None`."""
+
+    def delete_for_user(self, user_id: str, conversation_id: str) -> bool:
+        """Delete one conversation owned by ``user_id``; `False` if none matched."""
 
 
 class ConversationCreateError(Exception):
@@ -216,3 +248,46 @@ class SupabaseConversationStore:
         if result is None or result.data is None:
             return None
         return Conversation.model_validate(result.data)
+
+    def rename_for_user(
+        self, user_id: str, conversation_id: str, title: str | None
+    ) -> Conversation | None:
+        """Set ``title`` on one row owned by ``user_id``; `None` when nothing matched.
+
+        The id and the owner are filtered in the same statement, so a foreign
+        or nonexistent conversation matches zero rows and the update applies to
+        nothing. The database's ``before update`` trigger refreshes
+        ``updated_at`` — the application never writes timestamps itself.
+        """
+        client = self._client_factory(self._settings)
+        result = (
+            client.table("conversations")
+            .update({"title": title})
+            .eq("id", conversation_id)
+            .eq("user_id", user_id)
+            .select(*CONVERSATION_COLUMNS)
+            .maybe_single()
+            .execute()
+        )
+        if result is None or result.data is None:
+            return None
+        return Conversation.model_validate(result.data)
+
+    def delete_for_user(self, user_id: str, conversation_id: str) -> bool:
+        """Delete one row owned by ``user_id``; `False` when nothing matched.
+
+        Same scoping rule as the reads: id and owner go into one statement, so
+        a conversation that belongs to someone else matches zero rows and is
+        never deleted.
+        """
+        client = self._client_factory(self._settings)
+        result = (
+            client.table("conversations")
+            .delete()
+            .eq("id", conversation_id)
+            .eq("user_id", user_id)
+            .select(*CONVERSATION_COLUMNS)
+            .maybe_single()
+            .execute()
+        )
+        return result is not None and result.data is not None
