@@ -4,11 +4,13 @@ The FastAPI backend/API for AgentsChat. **Foundation stage:** it starts locally 
 check, the authentication boundary, the `GET /me` profile read, and the conversation endpoints —
 `POST /conversations`, `GET /conversations`, `GET /conversations/{conversation_id}`,
 `PATCH /conversations/{conversation_id}`, and `DELETE /conversations/{conversation_id}` — all backed by
-Supabase — plus `POST /conversations/{conversation_id}/messages` for persisting user messages. An
-internal agent-runtime boundary (`app/runtime.py`: `RuntimeRequest`, `RuntimeResult`, `AgentRuntime`,
-`get_agent_runtime`) has a Hermes adapter (`app/hermes_adapter.py`) behind it. No agent runs yet: no
-assistant response is generated, no user-facing execution endpoint exists, and no Hermes process or
-credentials are required unless `AGENTSCHAT_API_HERMES_EXECUTABLE` is explicitly configured.
+Supabase — plus `POST /conversations/{conversation_id}/messages` for persisting user messages and
+`POST /conversations/{conversation_id}/execute` for submitting one to the agent runtime. An
+agent-runtime boundary (`app/runtime.py`: `RuntimeRequest`, `RuntimeResult`, `AgentRuntime`,
+`get_agent_runtime`) has a Hermes adapter (`app/hermes_adapter.py`) behind it, and execution is a
+single synchronous request/response run — no assistant message is persisted yet and nothing is
+streamed. No Hermes process or credentials are required unless `AGENTSCHAT_API_HERMES_EXECUTABLE` is
+explicitly configured.
 
 ## Requirements
 
@@ -241,8 +243,58 @@ matches nothing and answers the identical `404`.
 | Supabase unconfigured or unreachable (rename) | `503` | `{"detail": "The conversation could not be updated."}` |
 | Supabase unconfigured or unreachable (delete) | `503` | `{"detail": "The conversation could not be deleted."}` |
 
-No user-facing execution endpoint, assistant message, or streaming exists yet:
-the runtime contract section below is internal infrastructure only.
+Assistant message persistence, message-history retrieval, and streaming do not exist yet: see
+`## Execution` below for what does run.
+
+## Execution (Task 8.1)
+
+`POST /conversations/{conversation_id}/execute` is the first real execution path — the one place a
+user message travels `FastAPI → runtime interface → Hermes adapter → Hermes`. The body is
+`{"content": "..."}` only: the same `CreateMessageRequest` model the message endpoint uses, so
+validation is identical (missing, empty, whitespace-only, or content past 4000 characters is the same
+`422`). No model, provider, temperature, tools, files, or other runtime configuration is
+client-settable.
+
+The handler performs exactly this sequence, in this order:
+
+1. authenticate (the Task 3.2 dependency — identity never comes from the body or path);
+2. persist the user message through the same owner-scoped store as `POST .../messages`, which is also
+   the ownership check: a conversation the caller does not own writes nothing and answers the same
+   `404` as one that does not exist, so the runtime is never reached for it;
+3. build a `RuntimeRequest` from the persisted row — `user_id`, `conversation_id`, `content` only —
+   with no HTTP request, Supabase client, credential, or Hermes object crossing the boundary;
+4. `await runtime.execute(request)` exactly once: no retry, no queue, no background worker;
+5. translate the `RuntimeResult` into the response.
+
+Success answers `200` with the Task 7.1 `RuntimeResult` itself — `{"ok": true, "output": "...",
+"reason": null, "message": ""}` — so no parallel result shape is invented. Failures are HTTP errors
+whose `detail` is always the runtime contract's fixed wording, never `RuntimeResult.message`:
+
+| Runtime reason | Status | `detail` |
+| --- | --- | --- |
+| `unavailable` | `503` | The agent runtime is not available. |
+| `failed` | `502` | The agent run failed. |
+| `timed-out` | `504` | The agent run took too long and was stopped. |
+| `invalid-request` | `400` | The agent runtime rejected the request. |
+
+| Case | Status | Body |
+| --- | --- | --- |
+| No / malformed / rejected token | `401` | (as in `## Authentication` above) |
+| Id that is not a UUID | `422` | FastAPI validation error |
+| Missing, empty, whitespace-only, or overlong content | `422` | FastAPI validation error |
+| Missing conversation, or one owned by someone else | `404` | `{"detail": "Conversation not found."}` |
+| Supabase unconfigured or unreachable while persisting | `503` | `{"detail": "The message could not be sent."}` |
+| Runtime failure (table above) | `502` / `503` / `504` / `400` | `{"detail": "<fixed wording>"}` |
+
+**Failure semantics.** The user message is persisted *before* the run starts, so when the runtime
+fails the conversation still holds the user's request: nothing is deleted, no assistant message is
+invented, and nothing is retried. Exactly one run happens per HTTP request; full execution
+idempotency for a client that submits the same request twice is deliberately **deferred** — there is
+no lock, queue, or deduplication store, and introducing one is not part of this task.
+
+Tests swap a fake runtime in through `get_agent_runtime`, so the normal suite never starts Hermes.
+`tests/test_execute_endpoint.py` covers authentication, ownership, validation, persistence order,
+each failure translation, and leak resistance.
 
 ## Agent runtime boundary (Tasks 7.1–7.2)
 
@@ -287,8 +339,8 @@ Conversation continuity across runs (resuming a Hermes session per `conversation
 **not** part of this task: the run's workspace is disposable, so no session survives it. That belongs
 with the durable per-run workspace and is recorded as a follow-up.
 
-No user-facing execution endpoint exists yet, so nothing calls the adapter in production; startup and
-`GET /health` still never touch Hermes.
+The execution endpoint above is the adapter's only caller: a run happens only inside an
+authenticated `POST .../execute` request, and startup and `GET /health` still never touch Hermes.
 
 ## Structure
 
@@ -305,7 +357,7 @@ apps/api/
 │   ├── profiles.py       # profile store + lookup (verified identity → profile row)
 │   ├── runtime.py        # agent runtime contract: request/result types, AgentRuntime, DI (Task 7.1)
 │   ├── supabase_client.py # backend Supabase boundary (service-role key, server-only)
-│   └── main.py           # FastAPI app: health, /me, and the conversation routes
+│   └── main.py           # FastAPI app: health, /me, conversations, messages, execution
 ├── tests/
 │   ├── test_auth.py
 │   ├── test_config.py
@@ -314,6 +366,7 @@ apps/api/
 │   ├── test_conversations.py
 │   ├── test_cors.py
 │   ├── test_error_handling.py
+│   ├── test_execute_endpoint.py # execution endpoint: auth, ownership, persistence order, failures
 │   ├── test_health.py
 │   ├── test_hermes_adapter.py   # command shape, isolation, outcome translation, DI selection
 │   ├── test_logging.py

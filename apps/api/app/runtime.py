@@ -18,7 +18,7 @@ retries, and streaming do not exist in the product yet.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Annotated, Protocol
+from typing import Annotated, Final, Protocol
 from uuid import UUID
 
 from fastapi import Depends
@@ -28,6 +28,16 @@ from app.config import Settings, get_settings
 
 #: Longest user content the runtime accepts, mirroring the message endpoint.
 RUNTIME_CONTENT_MAX_LENGTH = 4000
+
+#: The one wording for each failure reason, owned by the contract: the
+#: unavailable placeholder, the Hermes adapter, and the execution endpoint's
+#: HTTP details all use these, so the same outcome reads the same wherever it
+#: surfaces. They are application text, never provider wording (root AGENTS.md
+#: §13, §18 — one canonical definition instead of copies).
+RUNTIME_UNAVAILABLE_MESSAGE: Final[str] = "The agent runtime is not available."
+RUNTIME_FAILED_MESSAGE: Final[str] = "The agent run failed."
+RUNTIME_TIMED_OUT_MESSAGE: Final[str] = "The agent run took too long and was stopped."
+RUNTIME_INVALID_REQUEST_MESSAGE: Final[str] = "The agent runtime rejected the request."
 
 
 class RuntimeRequest(BaseModel):
@@ -98,7 +108,7 @@ class _UnavailableRuntime:
         return RuntimeResult(
             ok=False,
             reason=RuntimeFailureReason.UNAVAILABLE,
-            message="The agent runtime is not available.",
+            message=RUNTIME_UNAVAILABLE_MESSAGE,
         )
 
 

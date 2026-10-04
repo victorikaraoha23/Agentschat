@@ -39,7 +39,14 @@ from typing import Final, Literal
 from pydantic import BaseModel, ConfigDict
 
 from app.logging_config import logger
-from app.runtime import RuntimeFailureReason, RuntimeRequest, RuntimeResult
+from app.runtime import (
+    RUNTIME_FAILED_MESSAGE,
+    RUNTIME_TIMED_OUT_MESSAGE,
+    RUNTIME_UNAVAILABLE_MESSAGE,
+    RuntimeFailureReason,
+    RuntimeRequest,
+    RuntimeResult,
+)
 
 #: Environment variables of this application that are never passed to Hermes.
 #: The child needs the host environment to run, but never AgentsChat's own
@@ -62,12 +69,10 @@ _LOGGED_ERROR_LIMIT: Final[int] = 300
 #: usable result at all. Server-side only, never returned to a caller.
 _LOGGED_STDERR_LIMIT: Final[int] = 500
 
-#: Fixed, safe summaries. Callers are told what happened to their work in
+#: Fixed, safe summaries are owned by the runtime contract (``app.runtime``)
+#: rather than redefined here: callers are told what happened to their work in
 #: application terms; the runtime's own error text never leaves this module
 #: (root ``AGENTS.md`` §13).
-_UNAVAILABLE_MESSAGE: Final[str] = "The agent runtime is not available."
-_FAILED_MESSAGE: Final[str] = "The agent run failed."
-_TIMED_OUT_MESSAGE: Final[str] = "The agent run took too long and was stopped."
 
 
 class _HermesResultRecord(BaseModel):
@@ -162,7 +167,7 @@ def _outcome_of(
             process.returncode,
             stderr.decode("utf-8", errors="replace")[-_LOGGED_STDERR_LIMIT:],
         )
-        return _failure(RuntimeFailureReason.FAILED, _FAILED_MESSAGE)
+        return _failure(RuntimeFailureReason.FAILED, RUNTIME_FAILED_MESSAGE)
     if process.returncode != 0 or record.exit_code != 0 or record.error:
         logger.warning(
             "Hermes run failed (exit_code=%s, reported_exit_code=%s, error=%s).",
@@ -170,12 +175,12 @@ def _outcome_of(
             record.exit_code,
             (record.error or "")[:_LOGGED_ERROR_LIMIT],
         )
-        return _failure(RuntimeFailureReason.FAILED, _FAILED_MESSAGE)
+        return _failure(RuntimeFailureReason.FAILED, RUNTIME_FAILED_MESSAGE)
     if record.text.strip() == "":
         # A run that claims success but produced nothing did not do the work,
         # and presenting it as an answer would misstate the outcome (§13).
         logger.warning("Hermes reported success without output.")
-        return _failure(RuntimeFailureReason.FAILED, _FAILED_MESSAGE)
+        return _failure(RuntimeFailureReason.FAILED, RUNTIME_FAILED_MESSAGE)
     return RuntimeResult(ok=True, output=record.text)
 
 
@@ -232,7 +237,9 @@ class HermesRuntimeAdapter:
             )
         except OSError:
             logger.warning("Hermes could not be started.")
-            return _failure(RuntimeFailureReason.UNAVAILABLE, _UNAVAILABLE_MESSAGE)
+            return _failure(
+                RuntimeFailureReason.UNAVAILABLE, RUNTIME_UNAVAILABLE_MESSAGE
+            )
 
         try:
             stdout, stderr = await asyncio.wait_for(
@@ -244,7 +251,7 @@ class HermesRuntimeAdapter:
                 self._timeout_seconds,
             )
             await _stop_process(process)
-            return _failure(RuntimeFailureReason.TIMED_OUT, _TIMED_OUT_MESSAGE)
+            return _failure(RuntimeFailureReason.TIMED_OUT, RUNTIME_TIMED_OUT_MESSAGE)
         finally:
             # Reached on success, on timeout, and on cancellation: a run that is
             # no longer awaited must not outlive its caller (root AGENTS.md §12).
