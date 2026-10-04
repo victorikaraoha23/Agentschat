@@ -1,4 +1,4 @@
-"""AgentsChat FastAPI application: health check, identity, and conversations."""
+"""AgentsChat FastAPI application: health, identity, conversations, messages, and execution."""
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from httpx import HTTPError
 from pydantic import BaseModel, Field, field_validator
+from starlette.concurrency import run_in_threadpool
 from supabase import PostgrestAPIError, SupabaseException
 
 from app.auth import AuthenticatedUser, require_authenticated_user
@@ -30,6 +31,16 @@ from app.profiles import (
     SupabaseProfileStore,
     UserProfile,
     load_user_profile,
+)
+from app.runtime import (
+    RUNTIME_FAILED_MESSAGE,
+    RUNTIME_INVALID_REQUEST_MESSAGE,
+    RUNTIME_TIMED_OUT_MESSAGE,
+    RUNTIME_UNAVAILABLE_MESSAGE,
+    AgentRuntimeDep,
+    RuntimeFailureReason,
+    RuntimeRequest,
+    RuntimeResult,
 )
 from app.supabase_client import (
     SupabaseNotConfiguredError,
@@ -393,6 +404,125 @@ def create_message(
         )
     return message
 
+
+
+#: HTTP status plus fixed detail for each runtime failure reason. The detail is
+#: always the runtime contract's own wording — never ``RuntimeResult.message`` —
+#: so no runtime implementation can put arbitrary prose, a stack trace, or a
+#: provider payload into an API error body (root AGENTS.md §13). 502: the agent
+#: dependency failed; 503: it is unavailable; 504: the run hit its time limit;
+#: 400: the runtime rejected the request itself.
+_RUNTIME_FAILURE_RESPONSES: dict[RuntimeFailureReason, tuple[int, str]] = {
+    RuntimeFailureReason.UNAVAILABLE: (
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        RUNTIME_UNAVAILABLE_MESSAGE,
+    ),
+    RuntimeFailureReason.FAILED: (
+        status.HTTP_502_BAD_GATEWAY,
+        RUNTIME_FAILED_MESSAGE,
+    ),
+    RuntimeFailureReason.TIMED_OUT: (
+        status.HTTP_504_GATEWAY_TIMEOUT,
+        RUNTIME_TIMED_OUT_MESSAGE,
+    ),
+    RuntimeFailureReason.INVALID_REQUEST: (
+        status.HTTP_400_BAD_REQUEST,
+        RUNTIME_INVALID_REQUEST_MESSAGE,
+    ),
+}
+
+
+@app.post(
+    "/conversations/{conversation_id}/execute",
+    response_model=RuntimeResult,
+    status_code=status.HTTP_200_OK,
+)
+async def execute_user_message(
+    conversation_id: UUID,
+    body: CreateMessageRequest,
+    user: Annotated[AuthenticatedUser, Depends(require_authenticated_user)],
+    store: Annotated[SupabaseMessageStore, Depends(get_message_store)],
+    runtime: AgentRuntimeDep,
+) -> RuntimeResult:
+    """Persist the caller's message, run it through the agent runtime, and answer with its result.
+
+    The first real execution path (Task 8.1): verified identity → owner-scoped
+    persistence → contract request → ``AgentRuntime`` → typed result. The
+    handler talks only to the runtime interface; reaching Hermes is entirely
+    the adapter's business behind it (root AGENTS.md §3, §11).
+
+    Persistence deliberately comes first, so the user's request is part of the
+    conversation even when the run subsequently fails: a failed run leaves the
+    user message in place, writes no assistant message (a later task owns that),
+    and is not retried. Exactly one run happens per HTTP request — full
+    idempotency for a client that submits twice is deferred.
+
+    The body reuses :class:`CreateMessageRequest`, so execution enforces
+    byte-for-byte the same validation as ``POST .../messages`` (missing, empty,
+    whitespace-only, or overlong content is the same 422). Identity is never
+    read from the body.
+    """
+    # 1. Persist the user message — this statement is also the ownership check,
+    #    exactly as the message endpoint does it: the store reads the
+    #    conversation with the verified identity together with the id, so a
+    #    conversation owned by someone else writes nothing and answers the same
+    #    404 as one that does not exist.
+    try:
+        message = await run_in_threadpool(
+            store.create_for_user, user.user_id, str(conversation_id), body.content
+        )
+    except MessageCreateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=MESSAGE_CREATE_UNAVAILABLE_DETAIL,
+        ) from exc
+    except (
+        PostgrestAPIError,
+        SupabaseException,
+        SupabaseNotConfiguredError,
+        HTTPError,
+    ) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=MESSAGE_CREATE_UNAVAILABLE_DETAIL,
+        ) from exc
+
+    if message is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=CONVERSATION_NOT_FOUND_DETAIL,
+        )
+
+    # 2. Build the contract request from the row that was just written: three
+    #    application values only. No HTTP request, no Supabase client, no
+    #    credentials, no Hermes object or configuration enters the runtime layer
+    #    (root AGENTS.md §11).
+    runtime_request = RuntimeRequest(
+        user_id=UUID(user.user_id),
+        conversation_id=conversation_id,
+        content=message.content,
+    )
+
+    # 3. One execution per HTTP request: no automatic retry, no queue, no second
+    #    attempt on failure (root AGENTS.md §12).
+    result = await runtime.execute(runtime_request)
+
+    if not result.ok:
+        # `RuntimeResult` requires a reason for every failure; `or FAILED` only
+        # keeps the mapping total if a future implementation ever omits one.
+        reason = result.reason or RuntimeFailureReason.FAILED
+        # The runtime's own summary is for the server-side log only; the caller
+        # receives the fixed detail for the reason.
+        logger.warning(
+            "Agent execution failed (conversation_id=%s, reason=%s): %s",
+            conversation_id,
+            reason.value,
+            result.message,
+        )
+        status_code, detail = _RUNTIME_FAILURE_RESPONSES[reason]
+        raise HTTPException(status_code=status_code, detail=detail)
+
+    return result
 
 
 @app.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)

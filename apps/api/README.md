@@ -4,7 +4,13 @@ The FastAPI backend/API for AgentsChat. **Foundation stage:** it starts locally 
 check, the authentication boundary, the `GET /me` profile read, and the conversation endpoints —
 `POST /conversations`, `GET /conversations`, `GET /conversations/{conversation_id}`,
 `PATCH /conversations/{conversation_id}`, and `DELETE /conversations/{conversation_id}` — all backed by
-Supabase. It has no chat, agent execution, or Hermes integration yet.
+Supabase — plus `POST /conversations/{conversation_id}/messages` for persisting user messages and
+`POST /conversations/{conversation_id}/execute` for submitting one to the agent runtime. An
+agent-runtime boundary (`app/runtime.py`: `RuntimeRequest`, `RuntimeResult`, `AgentRuntime`,
+`get_agent_runtime`) has a Hermes adapter (`app/hermes_adapter.py`) behind it, and execution is a
+single synchronous request/response run — no assistant message is persisted yet and nothing is
+streamed. No Hermes process or credentials are required unless `AGENTSCHAT_API_HERMES_EXECUTABLE` is
+explicitly configured.
 
 ## Requirements
 
@@ -35,6 +41,8 @@ environment variables. Every setting has a safe default, so no `.env` file is re
 | `AGENTSCHAT_API_LOG_LEVEL` | `INFO` | Root log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`); unknown values fail validation |
 | `AGENTSCHAT_API_SUPABASE_URL` | *(unset)* | Supabase project URL for the backend client; set together with the key below, or neither |
 | `AGENTSCHAT_API_SUPABASE_SERVICE_ROLE_KEY` | *(unset)* | Privileged Supabase service-role key — **server-only**, never exposed to the browser; a URL without a key (or key without URL) fails validation |
+| `AGENTSCHAT_API_HERMES_EXECUTABLE` | *(unset)* | Command or path that starts the Hermes CLI; unset keeps Hermes unconfigured and agent runs report `unavailable`. An entry that is present but blank fails validation |
+| `AGENTSCHAT_API_HERMES_TIMEOUT_SECONDS` | `120` | Hard wall-clock limit for one agent run; the run is stopped and reported as timed out when it elapses; must be greater than zero |
 
 Invalid values (for example an empty string) fail validation when settings load, naming the offending
 field. Copy `.env.example` to `.env` only when real values exist — never commit the copy (`.env*` files
@@ -235,7 +243,104 @@ matches nothing and answers the identical `404`.
 | Supabase unconfigured or unreachable (rename) | `503` | `{"detail": "The conversation could not be updated."}` |
 | Supabase unconfigured or unreachable (delete) | `503` | `{"detail": "The conversation could not be deleted."}` |
 
-No message, chat, or runtime endpoint exists yet.
+Assistant message persistence, message-history retrieval, and streaming do not exist yet: see
+`## Execution` below for what does run.
+
+## Execution (Task 8.1)
+
+`POST /conversations/{conversation_id}/execute` is the first real execution path — the one place a
+user message travels `FastAPI → runtime interface → Hermes adapter → Hermes`. The body is
+`{"content": "..."}` only: the same `CreateMessageRequest` model the message endpoint uses, so
+validation is identical (missing, empty, whitespace-only, or content past 4000 characters is the same
+`422`). No model, provider, temperature, tools, files, or other runtime configuration is
+client-settable.
+
+The handler performs exactly this sequence, in this order:
+
+1. authenticate (the Task 3.2 dependency — identity never comes from the body or path);
+2. persist the user message through the same owner-scoped store as `POST .../messages`, which is also
+   the ownership check: a conversation the caller does not own writes nothing and answers the same
+   `404` as one that does not exist, so the runtime is never reached for it;
+3. build a `RuntimeRequest` from the persisted row — `user_id`, `conversation_id`, `content` only —
+   with no HTTP request, Supabase client, credential, or Hermes object crossing the boundary;
+4. `await runtime.execute(request)` exactly once: no retry, no queue, no background worker;
+5. translate the `RuntimeResult` into the response.
+
+Success answers `200` with the Task 7.1 `RuntimeResult` itself — `{"ok": true, "output": "...",
+"reason": null, "message": ""}` — so no parallel result shape is invented. Failures are HTTP errors
+whose `detail` is always the runtime contract's fixed wording, never `RuntimeResult.message`:
+
+| Runtime reason | Status | `detail` |
+| --- | --- | --- |
+| `unavailable` | `503` | The agent runtime is not available. |
+| `failed` | `502` | The agent run failed. |
+| `timed-out` | `504` | The agent run took too long and was stopped. |
+| `invalid-request` | `400` | The agent runtime rejected the request. |
+
+| Case | Status | Body |
+| --- | --- | --- |
+| No / malformed / rejected token | `401` | (as in `## Authentication` above) |
+| Id that is not a UUID | `422` | FastAPI validation error |
+| Missing, empty, whitespace-only, or overlong content | `422` | FastAPI validation error |
+| Missing conversation, or one owned by someone else | `404` | `{"detail": "Conversation not found."}` |
+| Supabase unconfigured or unreachable while persisting | `503` | `{"detail": "The message could not be sent."}` |
+| Runtime failure (table above) | `502` / `503` / `504` / `400` | `{"detail": "<fixed wording>"}` |
+
+**Failure semantics.** The user message is persisted *before* the run starts, so when the runtime
+fails the conversation still holds the user's request: nothing is deleted, no assistant message is
+invented, and nothing is retried. Exactly one run happens per HTTP request; full execution
+idempotency for a client that submits the same request twice is deliberately **deferred** — there is
+no lock, queue, or deduplication store, and introducing one is not part of this task.
+
+Tests swap a fake runtime in through `get_agent_runtime`, so the normal suite never starts Hermes.
+`tests/test_execute_endpoint.py` covers authentication, ownership, validation, persistence order,
+each failure translation, and leak resistance.
+
+## Agent runtime boundary (Tasks 7.1–7.2)
+
+`app/runtime.py` defines the application-level boundary that the Hermes adapter sits behind, so
+application code depends on the contract rather than on Hermes imports, config keys, or response
+shapes (`API/domain → runtime interface → Hermes adapter → Hermes`):
+
+| Piece | Purpose |
+| --- | --- |
+| `RuntimeRequest` | The smallest useful execution input: verified `user_id`, `conversation_id`, and trimmed non-blank `content` (4000 characters max, mirroring the message endpoint). Never shell commands, code, paths, or credentials. |
+| `RuntimeResult` | Stable outcome: `ok=True` with assistant `output`, or `ok=False` with one small `RuntimeFailureReason` (`unavailable`, `failed`, `timed-out`, `invalid-request`) and a safe summary. Never exceptions, tracebacks, subprocess details, paths, or secrets. |
+| `AgentRuntime` | Async `execute(request) -> result` protocol, so the adapter may do model calls, subprocess, or network work correctly without new infrastructure. |
+| `get_agent_runtime` / `AgentRuntimeDep` | FastAPI dependency returning the configured implementation — `HermesRuntimeAdapter` when `AGENTSCHAT_API_HERMES_EXECUTABLE` is set, otherwise an unavailable-runtime placeholder — so `dependency_overrides` can substitute fakes without touching business logic. |
+
+`tests/fake_runtime.py` provides the in-memory doubles (`FakeSuccessRuntime`, `FakeFailureRuntime`:
+no Hermes, model, subprocess, or network) and `tests/test_runtime_contract.py` proves the request/result
+shapes, both fake outcomes, the DI substitution, and the default unavailable answer.
+
+### Hermes adapter (Task 7.2)
+
+`app/hermes_adapter.py` is the only module that knows how to reach Hermes, and it reaches it through
+Hermes's documented, machine-readable CLI surface in a child process — it never imports Hermes. One run:
+
+1. writes the request's `content` to a query file inside a **fresh temporary workspace**;
+2. starts `<executable> chat --query-file <path> --format stream-json --oneshot` with that workspace as
+   the working directory, a **filtered environment** with every `AGENTSCHAT_*` variable removed, and
+   `asyncio.create_subprocess_exec` (no shell), under `AGENTSCHAT_API_HERMES_TIMEOUT_SECONDS`;
+3. parses the terminal `result` record of the stream-JSON output and maps it onto `RuntimeResult`.
+
+Consequences worth knowing:
+
+- **User text is never a command-line argument**, so quotes, `$(...)`, and backticks cannot become
+  arguments or shell syntax.
+- **The runtime never sees this application's directory, its configuration, or the service-role key.**
+- **Timeouts stop the child** (terminate, then kill) and report `timed-out`; a command that cannot be
+  started reports `unavailable`; a bad exit code, a Hermes `error` field, missing output, or unparseable
+  output reports `failed`.
+- **Hermes's own wording never reaches a caller.** Callers get one of three fixed summaries; exit codes,
+  Hermes error text, and the stderr tail are logged server-side only.
+
+Conversation continuity across runs (resuming a Hermes session per `conversation_id`) is deliberately
+**not** part of this task: the run's workspace is disposable, so no session survives it. That belongs
+with the durable per-run workspace and is recorded as a follow-up.
+
+The execution endpoint above is the adapter's only caller: a run happens only inside an
+authenticated `POST .../execute` request, and startup and `GET /health` still never touch Hermes.
 
 ## Structure
 
@@ -246,10 +351,13 @@ apps/api/
 │   ├── auth.py           # authenticated-identity boundary (verified token → user)
 │   ├── config.py         # centralized settings (AGENTSCHAT_API_*)
 │   ├── conversations.py  # conversation row type + create/list/get/rename/delete stores (Tasks 5.2–5.4)
+│   ├── hermes_adapter.py # Hermes CLI adapter behind the runtime contract (Task 7.2)
 │   ├── logging_config.py # central logging setup (stdlib only, LOG_FORMAT)
+│   ├── messages.py       # message row type + create store (Task 6.2)
 │   ├── profiles.py       # profile store + lookup (verified identity → profile row)
+│   ├── runtime.py        # agent runtime contract: request/result types, AgentRuntime, DI (Task 7.1)
 │   ├── supabase_client.py # backend Supabase boundary (service-role key, server-only)
-│   └── main.py           # FastAPI app: health, /me, and the conversation routes
+│   └── main.py           # FastAPI app: health, /me, conversations, messages, execution
 ├── tests/
 │   ├── test_auth.py
 │   ├── test_config.py
@@ -258,11 +366,18 @@ apps/api/
 │   ├── test_conversations.py
 │   ├── test_cors.py
 │   ├── test_error_handling.py
+│   ├── test_execute_endpoint.py # execution endpoint: auth, ownership, persistence order, failures
 │   ├── test_health.py
+│   ├── test_hermes_adapter.py   # command shape, isolation, outcome translation, DI selection
 │   ├── test_logging.py
+│   ├── test_message_creation.py
+│   ├── test_message_store.py
+│   ├── test_messages.py
 │   ├── test_profiles.py
+│   ├── test_runtime_contract.py
+│   ├── fake_runtime.py     # in-memory AgentRuntime doubles (success + failure)
 │   └── test_supabase.py
-├── .env.example         # documents AGENTSCHAT_API_SUPABASE_* (placeholders only, committable)
+├── .env.example         # documents AGENTSCHAT_API_SUPABASE_* and AGENTSCHAT_API_HERMES_* (placeholders only, committable)
 ├── pyproject.toml       # dependencies + pytest configuration
 └── uv.lock              # locked dependency versions
 ```
