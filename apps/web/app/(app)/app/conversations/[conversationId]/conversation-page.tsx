@@ -7,13 +7,23 @@ import { ChatComposer } from "./chat-composer";
 import styles from "./conversation.module.css";
 import { ConversationEmptyState } from "./conversation-empty-state";
 import { ConversationHeader } from "./conversation-header";
+import { ConversationMessageList } from "./conversation-message-list";
 import { getCurrentSession, type SessionState } from "@/lib/auth";
+import type { ChatSubmitOutcome } from "@/lib/conversation-composer";
+import {
+  beginMessageSubmit,
+  initialThreadState,
+  messageSubmitted,
+  messageSubmitFailed,
+  type ConversationThreadState,
+} from "@/lib/conversation-thread";
 import type {
   ConversationPageDeniedReason,
   ConversationPageView,
 } from "@/lib/conversation-view";
 import { conversationTitle, toConversationPageView } from "@/lib/conversation-view";
 import { getConversation, type ConversationResult } from "@/lib/conversations-api";
+import { createMessage } from "@/lib/messages-api";
 import { toShellAccess } from "@/lib/shell-access";
 
 const DENIED_MESSAGES: Record<ConversationPageDeniedReason, string> = {
@@ -36,30 +46,33 @@ export interface ConversationPageProps {
 }
 
 /**
- * The conversation page body: session gate, conversation load, and the one view
- * `lib/conversation-view.ts` decides (Task 6.1).
+ * The conversation page body: session gate, conversation load, the messages it
+ * holds, and sending a new one (Task 6.2).
  *
- * Access uses the same boundary as the rest of the application — the session
- * `lib/auth.ts` reports, mapped through `toShellAccess` — so there is no second
+ * Access uses the same boundary as the rest of the application -- the session
+ * `lib/auth.ts` reports, mapped through `toShellAccess` -- so there is no second
  * authentication system and no private content renders before a session is
- * granted. The conversation is read with `getConversation`, which carries the
+ * granted. The conversation is read and written with the typed functions in
+ * `lib/conversations-api.ts` and `lib/messages-api.ts`, which carry the
  * session's access token; nothing here renders an owner id, a token, or a raw
  * failure.
  *
- * No message is sent, saved, or simulated: the workspace is the shell the next
- * task connects to message persistence.
+ * A message is shown only after the API confirms it was stored, so the
+ * conversation never contains something that does not exist. This task stops at
+ * persistence: no agent runs, no reply is produced, and nothing is streamed.
  */
 export function ConversationPage({ conversationId }: ConversationPageProps) {
   const [session, setSession] = useState<SessionState | null>(null);
   // The loaded result is tagged with the id and the attempt it belongs to, so
-  // navigating to another conversation — or retrying — never shows the previous
-  // conversation's answer while the new one is in flight.
+  // navigating to another conversation -- or retrying -- never shows the
+  // previous conversation's answer while the new one is in flight.
   const [load, setLoad] = useState<{
     conversationId: string;
     attempt: number;
     result: ConversationResult;
   } | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [thread, setThread] = useState<ConversationThreadState>(initialThreadState);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,6 +106,22 @@ export function ConversationPage({ conversationId }: ConversationPageProps) {
   const retry = useCallback(() => {
     setAttempt((current) => current + 1);
   }, []);
+
+  const sendMessage = useCallback(
+    async (content: string): Promise<ChatSubmitOutcome> => {
+      // The thread rules refuse a second submit while one is in flight, so a
+      // double click or an impatient Enter cannot send the same text twice.
+      setThread(beginMessageSubmit);
+      const result = await createMessage({ conversationId, content });
+      if (result.ok) {
+        setThread((state) => messageSubmitted(state, result.message));
+        return { ok: true, message: "" };
+      }
+      setThread((state) => messageSubmitFailed(state, result.message));
+      return { ok: false, message: result.message };
+    },
+    [conversationId],
+  );
 
   const result =
     load !== null && load.conversationId === conversationId && load.attempt === attempt
@@ -169,9 +198,18 @@ export function ConversationPage({ conversationId }: ConversationPageProps) {
     <main className={styles.workspace}>
       <ConversationHeader title={conversationTitle(view.conversation)} />
       <section className={`${styles.messageArea} surface`} aria-label="Messages">
-        <ConversationEmptyState />
+        {thread.messages.length === 0 ? (
+          <ConversationEmptyState />
+        ) : (
+          <ConversationMessageList messages={thread.messages} />
+        )}
       </section>
-      <ChatComposer />
+      <ChatComposer submitting={thread.submitting} onSubmit={sendMessage} />
+      {thread.error !== null && (
+        <p className="status-error" role="alert">
+          {thread.error}
+        </p>
+      )}
     </main>
   );
 }
