@@ -7,16 +7,7 @@ import { ChatComposer } from "./chat-composer";
 import styles from "./conversation.module.css";
 import { ConversationEmptyState } from "./conversation-empty-state";
 import { ConversationHeader } from "./conversation-header";
-import { ConversationMessageList } from "./conversation-message-list";
 import { getCurrentSession, type SessionState } from "@/lib/auth";
-import type { ChatSubmitOutcome } from "@/lib/conversation-composer";
-import {
-  beginMessageSubmit,
-  initialThreadState,
-  messageSubmitted,
-  messageSubmitFailed,
-  type ConversationThreadState,
-} from "@/lib/conversation-thread";
 import type {
   ConversationPageDeniedReason,
   ConversationPageView,
@@ -64,8 +55,8 @@ export interface ConversationPageProps {
 export function ConversationPage({ conversationId }: ConversationPageProps) {
   const [session, setSession] = useState<SessionState | null>(null);
   // The loaded result is tagged with the id and the attempt it belongs to, so
-  // navigating to another conversation -- or retrying -- never shows the
-  // previous conversation's answer while the new one is in flight.
+  // navigating to another conversation — or retrying — never shows the previous
+  // conversation's answer while the new one is in flight.
   const [load, setLoad] = useState<{
     conversationId: string;
     attempt: number;
@@ -75,15 +66,18 @@ export function ConversationPage({ conversationId }: ConversationPageProps) {
   const [thread, setThread] = useState<ConversationThreadState>(initialThreadState);
 
   useEffect(() => {
-    let cancelled = false;
-    void getCurrentSession().then((next) => {
-      if (!cancelled) {
-        setSession(next);
+    let userId: string | null = null;
+    return subscribeToSession((next) => {
+      const nextUserId = next.status === "authenticated" ? next.userId : null;
+      if (nextUserId !== userId) {
+        userId = nextUserId;
+        setLoad(null);
+        // Also invalidate in-flight results, including a quick sign-out/sign-in
+        // to the same account before React has cleaned up the previous effect.
+        setAttempt((current) => current + 1);
       }
+      setSession(next);
     });
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   const access = toShellAccess(session);

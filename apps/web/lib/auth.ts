@@ -317,6 +317,35 @@ export async function getCurrentSession(
   }
 }
 
+/** Observe the initial session and later auth changes without storing tokens. */
+export function subscribeToSession(
+  onSession: (session: SessionState) => void,
+  client: {
+    auth: {
+      onAuthStateChange(callback: (
+        event: string,
+        session: { user: ClientUserLike } | null,
+      ) => void): { data: { subscription: { unsubscribe(): void } } };
+    };
+  } | null = getSupabaseClient(),
+): () => void {
+  if (client === null) {
+    onSession({ status: "unconfigured" });
+    return () => {};
+  }
+
+  // Supabase emits INITIAL_SESSION after registering the listener, avoiding a
+  // separate session read that could race with a subsequent auth change.
+  const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
+    onSession(session === null ? { status: "unauthenticated" } : {
+      status: "authenticated",
+      userId: session.user.id,
+      email: normalizeEmail(session.user.email),
+    });
+  });
+  return () => subscription.unsubscribe();
+}
+
 /**
  * Return the session's access token for an authenticated API call, or `null`.
  *
