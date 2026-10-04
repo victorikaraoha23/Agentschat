@@ -7,7 +7,16 @@ import { ChatComposer } from "./chat-composer";
 import styles from "./conversation.module.css";
 import { ConversationEmptyState } from "./conversation-empty-state";
 import { ConversationHeader } from "./conversation-header";
-import { getCurrentSession, type SessionState } from "@/lib/auth";
+import { ConversationMessageList } from "./conversation-message-list";
+import { subscribeToSession, type SessionState } from "@/lib/auth";
+import type { ChatSubmitOutcome } from "@/lib/conversation-composer";
+import {
+  beginMessageSubmit,
+  initialThreadState,
+  messageSubmitted,
+  messageSubmitFailed,
+  type ConversationThreadState,
+} from "@/lib/conversation-thread";
 import type {
   ConversationPageDeniedReason,
   ConversationPageView,
