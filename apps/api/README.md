@@ -4,7 +4,10 @@ The FastAPI backend/API for AgentsChat. **Foundation stage:** it starts locally 
 check, the authentication boundary, the `GET /me` profile read, and the conversation endpoints —
 `POST /conversations`, `GET /conversations`, `GET /conversations/{conversation_id}`,
 `PATCH /conversations/{conversation_id}`, and `DELETE /conversations/{conversation_id}` — all backed by
-Supabase. It has no chat, agent execution, or Hermes integration yet.
+Supabase — plus `POST /conversations/{conversation_id}/messages` for persisting user messages. An
+internal agent-runtime contract (`app/runtime.py`: `RuntimeRequest`, `RuntimeResult`, `AgentRuntime`,
+`get_agent_runtime`) defines the future Hermes boundary behind a fake-only placeholder; no agent runs,
+no assistant response is generated, and no Hermes process or credentials are required.
 
 ## Requirements
 
@@ -235,7 +238,26 @@ matches nothing and answers the identical `404`.
 | Supabase unconfigured or unreachable (rename) | `503` | `{"detail": "The conversation could not be updated."}` |
 | Supabase unconfigured or unreachable (delete) | `503` | `{"detail": "The conversation could not be deleted."}` |
 
-No message, chat, or runtime endpoint exists yet.
+No user-facing execution endpoint, assistant message, or streaming exists yet:
+the runtime contract section below is internal infrastructure only.
+
+## Agent runtime contract (Task 7.1)
+
+`app/runtime.py` defines the application-level boundary the future Hermes adapter will sit behind, so
+application code depends on the contract rather than on Hermes imports, config keys, or response
+shapes (`API/domain → runtime interface → Hermes adapter → Hermes`):
+
+| Piece | Purpose |
+| --- | --- |
+| `RuntimeRequest` | The smallest useful execution input: verified `user_id`, `conversation_id`, and trimmed non-blank `content` (4000 characters max, mirroring the message endpoint). Never shell commands, code, paths, or credentials. |
+| `RuntimeResult` | Stable outcome: `ok=True` with assistant `output`, or `ok=False` with one small `RuntimeFailureReason` (`unavailable`, `failed`, `timed-out`, `invalid-request`) and a safe summary. Never exceptions, tracebacks, subprocess details, paths, or secrets. |
+| `AgentRuntime` | Async `execute(request) -> result` protocol, so the future adapter may do model calls, subprocess, or network work correctly without new infrastructure. |
+| `get_agent_runtime` / `AgentRuntimeDep` | FastAPI dependency returning the configured implementation — an unavailable-runtime placeholder until Task 7.2 wires the real adapter — so `dependency_overrides` can substitute fakes without touching business logic. |
+
+`tests/fake_runtime.py` provides the in-memory doubles (`FakeSuccessRuntime`, `FakeFailureRuntime`:
+no Hermes, model, subprocess, or network) and `tests/test_runtime_contract.py` proves the request/result
+shapes, both fake outcomes, the DI substitution, and the default unavailable answer. Startup and
+`GET /health` never touch the runtime; no Hermes process, credentials, or configuration are required.
 
 ## Structure
 
@@ -247,7 +269,9 @@ apps/api/
 │   ├── config.py         # centralized settings (AGENTSCHAT_API_*)
 │   ├── conversations.py  # conversation row type + create/list/get/rename/delete stores (Tasks 5.2–5.4)
 │   ├── logging_config.py # central logging setup (stdlib only, LOG_FORMAT)
+│   ├── messages.py       # message row type + create store (Task 6.2)
 │   ├── profiles.py       # profile store + lookup (verified identity → profile row)
+│   ├── runtime.py        # agent runtime contract: request/result types, AgentRuntime, DI (Task 7.1)
 │   ├── supabase_client.py # backend Supabase boundary (service-role key, server-only)
 │   └── main.py           # FastAPI app: health, /me, and the conversation routes
 ├── tests/
@@ -260,7 +284,12 @@ apps/api/
 │   ├── test_error_handling.py
 │   ├── test_health.py
 │   ├── test_logging.py
+│   ├── test_message_creation.py
+│   ├── test_message_store.py
+│   ├── test_messages.py
 │   ├── test_profiles.py
+│   ├── test_runtime_contract.py
+│   ├── fake_runtime.py     # in-memory AgentRuntime doubles (success + failure)
 │   └── test_supabase.py
 ├── .env.example         # documents AGENTSCHAT_API_SUPABASE_* (placeholders only, committable)
 ├── pyproject.toml       # dependencies + pytest configuration
