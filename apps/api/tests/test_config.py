@@ -109,3 +109,42 @@ def test_blank_supabase_credentials_are_rejected(blank: str, pair: str) -> None:
 
     with pytest.raises(ValidationError, match="supabase"):
         Settings(supabase_url=url, supabase_service_role_key=key)
+
+
+def test_hermes_is_unconfigured_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without a Hermes command no process is ever started and runs stay unavailable."""
+    monkeypatch.delenv("AGENTSCHAT_API_HERMES_EXECUTABLE", raising=False)
+    monkeypatch.delenv("AGENTSCHAT_API_HERMES_TIMEOUT_SECONDS", raising=False)
+
+    settings = Settings()
+
+    assert settings.hermes_executable is None
+    assert settings.hermes_timeout_seconds == 120.0
+
+
+def test_hermes_command_and_limit_read_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AGENTSCHAT_API_HERMES_* variables are applied when present."""
+    monkeypatch.setenv("AGENTSCHAT_API_HERMES_EXECUTABLE", "/usr/local/bin/hermes")
+    monkeypatch.setenv("AGENTSCHAT_API_HERMES_TIMEOUT_SECONDS", "30")
+
+    settings = Settings()
+
+    assert settings.hermes_executable == "/usr/local/bin/hermes"
+    assert settings.hermes_timeout_seconds == 30.0
+
+
+@pytest.mark.parametrize("blank", ["", " ", "\t\n"])
+def test_blank_hermes_command_is_rejected(blank: str) -> None:
+    """An empty entry is a misconfiguration, reported with the field named."""
+    with pytest.raises(ValidationError, match="hermes_executable"):
+        Settings(hermes_executable=blank)
+
+
+def test_non_positive_run_limit_is_rejected() -> None:
+    """A run limit must be a positive number of seconds."""
+    with pytest.raises(ValidationError, match="hermes_timeout_seconds"):
+        Settings(hermes_timeout_seconds=0)

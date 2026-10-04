@@ -13,6 +13,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from app.config import Settings
 from app.runtime import (
     AgentRuntime,
     RuntimeFailureReason,
@@ -99,7 +100,14 @@ def test_app_code_receives_fake_runtime_through_dependency() -> None:
     assert len(fake.requests) == 1
 
 
-def test_default_runtime_reports_unavailable_without_hermes() -> None:
-    result = asyncio.run(get_agent_runtime().execute(_request()))
+def test_default_runtime_reports_unavailable_without_hermes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no Hermes command configured, runs answer unavailable and nothing starts."""
+    monkeypatch.delenv("AGENTSCHAT_API_HERMES_EXECUTABLE", raising=False)
+
+    result = asyncio.run(get_agent_runtime(Settings()).execute(_request()))
+
     assert result.ok is False
     assert result.reason is RuntimeFailureReason.UNAVAILABLE
+    assert result.message == "The agent runtime is not available."

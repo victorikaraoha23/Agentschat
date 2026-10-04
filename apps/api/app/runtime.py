@@ -5,8 +5,9 @@ Boundary owned here::
     API/domain  ->  Runtime interface (here)  ->  Hermes adapter  ->  Hermes
 
 Application code depends only on what is defined here, never on Hermes
-imports, config keys, or response shapes. The real adapter arrives in
-Task 7.2; until then nothing calls the runtime, and the API starts and
+imports, config keys, or response shapes. The adapter lives in
+``app/hermes_adapter.py`` and is selected by ``get_agent_runtime`` below;
+until a run is actually requested nothing calls it, and the API starts and
 serves exactly as before with no Hermes process or credentials present.
 
 The contract is deliberately small: who is asking, in which conversation,
@@ -22,6 +23,8 @@ from uuid import UUID
 
 from fastapi import Depends
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.config import Settings, get_settings
 
 #: Longest user content the runtime accepts, mirroring the message endpoint.
 RUNTIME_CONTENT_MAX_LENGTH = 4000
@@ -89,7 +92,7 @@ class AgentRuntime(Protocol):
 
 
 class _UnavailableRuntime:
-    """Placeholder wired into DI until Task 7.2 provides the Hermes adapter."""
+    """Placeholder used whenever no runtime implementation is configured."""
 
     async def execute(self, request: RuntimeRequest) -> RuntimeResult:
         return RuntimeResult(
@@ -102,9 +105,28 @@ class _UnavailableRuntime:
 _UNAVAILABLE = _UnavailableRuntime()
 
 
-def get_agent_runtime() -> AgentRuntime:
-    """FastAPI dependency returning the configured runtime implementation."""
-    return _UNAVAILABLE
+def get_agent_runtime(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AgentRuntime:
+    """FastAPI dependency returning the configured runtime implementation.
+
+    Configuration decides between the Hermes adapter and the unavailable
+    placeholder; nothing else does, and neither is touched at import time.
+    ``dependency_overrides`` substitutes a fake in tests without reaching into
+    either implementation.
+    """
+    executable = settings.hermes_executable
+    if executable is None:
+        return _UNAVAILABLE
+    # Imported here, not at module level: the adapter implements the contract
+    # above, so a top-level import would make the contract depend on its own
+    # implementation (root AGENTS.md §3).
+    from app.hermes_adapter import HermesRuntimeAdapter
+
+    return HermesRuntimeAdapter(
+        executable=executable,
+        timeout_seconds=settings.hermes_timeout_seconds,
+    )
 
 
 AgentRuntimeDep = Annotated[AgentRuntime, Depends(get_agent_runtime)]

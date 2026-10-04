@@ -55,6 +55,22 @@ class Settings(BaseSettings):
             "to the browser. None means Supabase is unconfigured."
         ),
     )
+    hermes_executable: str | None = Field(
+        default=None,
+        description=(
+            "Command or path that starts the Hermes CLI. None means Hermes is "
+            "unconfigured: no process is ever started and agent runs report "
+            "unavailable. Set it only where a Hermes installation exists."
+        ),
+    )
+    hermes_timeout_seconds: float = Field(
+        default=120.0,
+        gt=0,
+        description=(
+            "Hard wall-clock limit for one agent run; the run is stopped and "
+            "reported as timed out when it elapses."
+        ),
+    )
 
     @model_validator(mode="after")
     def _require_both_supabase_values(self) -> Settings:
@@ -67,6 +83,13 @@ class Settings(BaseSettings):
         ):
             if value is not None and not value.strip():
                 raise ValueError(f"{name} must contain a non-whitespace value")
+        return self
+
+    @model_validator(mode="after")
+    def _require_a_usable_hermes_executable(self) -> Settings:
+        """Accept either no Hermes command or a complete, non-blank one."""
+        if self.hermes_executable is not None and not self.hermes_executable.strip():
+            raise ValueError("hermes_executable must contain a non-whitespace value")
         return self
 
     @property
