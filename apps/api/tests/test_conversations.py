@@ -146,8 +146,9 @@ def test_conversation_model_rejects_malformed_rows() -> None:
 def test_conversation_surface_is_full_lifecycle_and_nothing_more() -> None:
     """The collection is POST + GET; the detail path is GET/PATCH/DELETE.
 
-    Task 5.4 owns exactly the two verbs it was assigned — no PUT anywhere, no
-    modification verb on any other path, and still no chat/message routes.
+    Task 6.2 adds exactly one more route — POST a message into a conversation —
+    and nothing else: no message retrieval yet, no PUT anywhere, no
+    modification verb on any other path, and still no chat routes.
     """
     routes = {
         (route.path, method)
@@ -163,6 +164,8 @@ def test_conversation_surface_is_full_lifecycle_and_nothing_more() -> None:
     assert ("/conversations/{conversation_id}", "GET") in routes
     assert ("/conversations/{conversation_id}", "PATCH") in routes
     assert ("/conversations/{conversation_id}", "DELETE") in routes
+    messages_path = "/conversations/{conversation_id}/messages"
+    assert (messages_path, "POST") in routes
     assert sorted(method for path, method in routes if path == "/conversations") == [
         "GET",
         "POST",
@@ -170,6 +173,8 @@ def test_conversation_surface_is_full_lifecycle_and_nothing_more() -> None:
     assert sorted(
         method for path, method in routes if path == "/conversations/{conversation_id}"
     ) == ["DELETE", "GET", "PATCH"]
+    # Task 6.2 persists a message but does not read history back yet.
+    assert sorted(method for path, method in routes if path == messages_path) == ["POST"]
     assert "PUT" not in {method for _, method in routes}
     assert {
         (path, method) for path, method in routes if method in {"PATCH", "DELETE"}

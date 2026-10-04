@@ -1,9 +1,9 @@
 /**
- * Unit tests for the chat composer's rules (Task 6.1).
+ * Unit tests for the chat composer's rules (Task 6.2).
  *
- * The composer's state changes are pure functions, so these tests cover typing,
- * the Send gate, and what submitting does — without a browser and without any
- * way for a test to make a request.
+ * Typing, the Send gate, and what a submit does to the draft are pure
+ * functions, so these tests cover the composer's behaviour with no browser and
+ * no way for a test to make a request.
  */
 
 import assert from "node:assert/strict";
@@ -11,19 +11,31 @@ import { test } from "node:test";
 
 import {
   canSendDraft,
-  COMPOSER_NOTICE_MESSAGE,
+  draftAfterSubmit,
   initialComposerState,
-  submitComposerDraft,
   withComposerDraft,
+  type ChatSubmitOutcome,
 } from "./conversation-composer.ts";
 
-test("the composer starts empty, with no notice", () => {
-  assert.deepEqual(initialComposerState(), { draft: "", noticeVisible: false });
+const SENT: ChatSubmitOutcome = { ok: true, message: "" };
+const FAILED: ChatSubmitOutcome = { ok: false, message: "Request failed." };
+
+test("the composer starts empty", () => {
+  assert.deepEqual(initialComposerState(), { draft: "" });
 });
 
 test("typing keeps what the user typed", () => {
-  const typed = withComposerDraft(initialComposerState(), "Plan a trip to Lisbon");
-  assert.deepEqual(typed, { draft: "Plan a trip to Lisbon", noticeVisible: false });
+  assert.deepEqual(withComposerDraft(initialComposerState(), "Plan a trip"), {
+    draft: "Plan a trip",
+  });
+});
+
+test("typing replaces the previous text rather than appending to it", () => {
+  const typed = withComposerDraft(initialComposerState(), "Plan a trip");
+
+  assert.deepEqual(withComposerDraft(typed, "Plan a trip to Lisbon"), {
+    draft: "Plan a trip to Lisbon",
+  });
 });
 
 test("send is available only for a draft that contains text", () => {
@@ -34,34 +46,23 @@ test("send is available only for a draft that contains text", () => {
   assert.equal(canSendDraft("  Hi  "), true);
 });
 
-test("the send control is disabled until the draft contains text", () => {
-  // The component renders `disabled={!canSendDraft(draft)}`; this pins the rule
-  // that makes the disabled state correct.
-  assert.equal(canSendDraft(initialComposerState().draft), false);
-  assert.equal(canSendDraft(withComposerDraft(initialComposerState(), "Hi").draft), true);
-});
-
-test("submitting shows the notice and keeps the draft, because nothing was sent", () => {
+test("a submitted message clears the draft, because it was stored", () => {
   const typed = withComposerDraft(initialComposerState(), "Plan a trip");
-  const submitted = submitComposerDraft(typed);
-  assert.deepEqual(submitted, { draft: "Plan a trip", noticeVisible: true });
+
+  assert.deepEqual(draftAfterSubmit(typed, SENT), { draft: "" });
 });
 
-test("submitting an empty draft changes nothing", () => {
-  const empty = initialComposerState();
-  assert.deepEqual(submitComposerDraft(empty), empty);
+test("a failed submit keeps the draft, because nothing was stored", () => {
+  const typed = withComposerDraft(initialComposerState(), "Plan a trip");
+
+  assert.deepEqual(draftAfterSubmit(typed, FAILED), { draft: "Plan a trip" });
 });
 
-test("typing again hides a notice that belonged to the previous text", () => {
-  const submitted = submitComposerDraft(
-    withComposerDraft(initialComposerState(), "Plan a trip"),
-  );
-  assert.deepEqual(withComposerDraft(submitted, "Plan a trip to Lisbon"), {
-    draft: "Plan a trip to Lisbon",
-    noticeVisible: false,
-  });
-});
+test("a retry after a failure starts from the same text", () => {
+  const typed = withComposerDraft(initialComposerState(), "Plan a trip");
 
-test("the notice states that messages are not sent yet", () => {
-  assert.match(COMPOSER_NOTICE_MESSAGE, /not sent/i);
+  const afterFailure = draftAfterSubmit(typed, FAILED);
+
+  assert.equal(draftAfterSubmit(afterFailure, SENT).draft, "");
+  assert.equal(afterFailure.draft, typed.draft);
 });

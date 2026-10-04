@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from httpx import HTTPError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from supabase import PostgrestAPIError, SupabaseException
 
 from app.auth import AuthenticatedUser, require_authenticated_user
@@ -20,6 +20,11 @@ from app.conversations import (
     SupabaseConversationStore,
 )
 from app.logging_config import configure_logging, logger
+from app.messages import (
+    Message,
+    MessageCreateError,
+    SupabaseMessageStore,
+)
 from app.profiles import (
     ProfileRowNotFoundError,
     SupabaseProfileStore,
@@ -292,6 +297,102 @@ def rename_conversation(
             detail=CONVERSATION_NOT_FOUND_DETAIL,
         )
     return conversation
+
+
+# ---------------------------------------------------------------------------
+# Messages (Task 6.2)
+# ---------------------------------------------------------------------------
+
+# A practical ceiling for one chat message: long enough for a pasted brief,
+# short enough that a row stays cheap to read and store. The database keeps its
+# own "not blank" guarantee; the length rule lives here, as the conversation
+# title's does, so there is one number to change.
+MAX_MESSAGE_CONTENT_LENGTH = 4000
+
+MESSAGE_CREATE_UNAVAILABLE_DETAIL = "The message could not be sent."
+
+
+class CreateMessageRequest(BaseModel):
+    """Body of POST /conversations/{conversation_id}/messages: the content only.
+
+    Deliberately minimal: no agent, model, system prompt, tools, temperature,
+    execution options, attachments, files, or metadata — a message is text a user
+    typed in one of their own conversations, and everything else belongs to a
+    later task.
+
+    Neither the conversation nor the author is a body field: the conversation
+    comes from the path and the author comes from the verified identity, so a
+    forged `user_id` or `conversation_id` in the body is dropped by Pydantic
+    before the handler ever sees it (root `AGENTS.md` §9).
+    """
+
+    content: str = Field(..., min_length=1, max_length=MAX_MESSAGE_CONTENT_LENGTH)
+
+    @field_validator("content")
+    @classmethod
+    def normalize_content(cls, value: str) -> str:
+        """Trim the content, and refuse a message with nothing in it.
+
+        Empty and whitespace-only content are validation errors (422), not a
+        silently stored blank. Trimming here keeps a single rule: what is stored
+        is what the user typed, minus surrounding whitespace.
+        """
+        stripped = value.strip()
+        if stripped == "":
+            raise ValueError("Content must not be blank.")
+        return stripped
+
+
+def get_message_store(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> SupabaseMessageStore:
+    """Provide the message store the creation endpoint writes through."""
+    return SupabaseMessageStore(settings)
+
+
+@app.post(
+    "/conversations/{conversation_id}/messages",
+    response_model=Message,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_message(
+    conversation_id: UUID,
+    body: CreateMessageRequest,
+    user: Annotated[AuthenticatedUser, Depends(require_authenticated_user)],
+    store: Annotated[SupabaseMessageStore, Depends(get_message_store)],
+) -> Message:
+    """Append the caller's message to a conversation they own, and return it.
+
+    Ownership is the caller's verified identity — never a body, query, or path
+    value — and the store reads the conversation with that identity before it
+    writes anything, so a conversation belonging to someone else answers exactly
+    the same 404 as one that does not exist. The message's `created_at` comes
+    from the database, and the conversation's `updated_at` is refreshed by the
+    migration's after-insert trigger rather than here.
+
+    This task stops at persistence: no agent runs, no assistant reply is
+    produced, and nothing is streamed.
+    """
+    try:
+        message = store.create_for_user(user.user_id, str(conversation_id), body.content)
+    except MessageCreateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=MESSAGE_CREATE_UNAVAILABLE_DETAIL,
+        ) from exc
+    except (PostgrestAPIError, SupabaseException, SupabaseNotConfiguredError, HTTPError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=MESSAGE_CREATE_UNAVAILABLE_DETAIL,
+        ) from exc
+
+    if message is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=CONVERSATION_NOT_FOUND_DETAIL,
+        )
+    return message
+
 
 
 @app.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)

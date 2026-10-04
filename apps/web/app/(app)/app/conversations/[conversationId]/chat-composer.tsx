@@ -4,35 +4,53 @@ import { useState, type FormEvent } from "react";
 
 import styles from "./conversation.module.css";
 import {
-  canSendDraft,
-  COMPOSER_NOTICE_MESSAGE,
+  draftAfterSubmit,
   initialComposerState,
-  submitComposerDraft,
   withComposerDraft,
+  type ChatSubmitOutcome,
 } from "@/lib/conversation-composer";
+import { messageContentProblem } from "@/lib/messages-api";
+
+export interface ChatComposerProps {
+  /** True while a send is in flight; disables Send so nothing is sent twice. */
+  submitting: boolean;
+  /** Sends the content and reports what the API answered. */
+  onSubmit: (content: string) => Promise<ChatSubmitOutcome>;
+}
 
 /**
  * The chat composer: a labelled message field and a real Send button.
  *
- * Task 6.1 persists nothing, so this composes no request at all. Submitting is
- * handled by `lib/conversation-composer.ts`, which shows an honest notice and
- * keeps what was typed — no message is stored, no assistant replies, and no
- * network call is made. The button is disabled while the draft holds no text so
- * the control's state is communicated, and the notice is announced through a
- * status region when it appears.
+ * It owns only the draft. Sending is the page's job, because the page owns the
+ * conversation id and the messages the conversation already holds; the outcome
+ * comes back here so a stored message clears the field and a failed one leaves
+ * the text in place.
+ *
+ * The client checks the draft before sending (empty, or over the documented
+ * limit) purely so the user gets an answer immediately. The API re-checks
+ * everything it accepts and stays the authority.
  */
-export function ChatComposer() {
+export function ChatComposer({ submitting, onSubmit }: ChatComposerProps) {
   const [composer, setComposer] = useState(initialComposerState);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    // Nothing is sent in this task; prevent the form's default navigation so the
-    // notice below is the only result of submitting.
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setComposer((state) => submitComposerDraft(state));
+    if (submitting) {
+      return;
+    }
+    const problem = messageContentProblem(composer.draft);
+    if (problem !== null) {
+      return;
+    }
+    const outcome = await onSubmit(composer.draft);
+    setComposer((state) => draftAfterSubmit(state, outcome));
   }
 
+  const problem = messageContentProblem(composer.draft);
+  const sendDisabled = submitting || problem !== null;
+
   return (
-    <form className={styles.composer} onSubmit={handleSubmit}>
+    <form className={styles.composer} onSubmit={handleSubmit} noValidate>
       <label className={styles.composerLabel} htmlFor="conversation-message">
         Message
       </label>
@@ -48,15 +66,15 @@ export function ChatComposer() {
             setComposer((state) => withComposerDraft(state, event.target.value))
           }
         />
-        <button type="submit" disabled={!canSendDraft(composer.draft)}>
-          Send
+        <button type="submit" disabled={sendDisabled} aria-busy={submitting}>
+          {submitting ? "Sending…" : "Send"}
         </button>
       </div>
-      {composer.noticeVisible && (
-        <p className={`muted ${styles.composerNotice}`} role="status">
-          {COMPOSER_NOTICE_MESSAGE}
-        </p>
-      )}
+      <p className={styles.composerHint}>
+        {problem !== null && !submitting
+          ? problem
+          : "Sent messages are saved to this conversation."}
+      </p>
     </form>
   );
 }
