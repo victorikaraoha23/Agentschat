@@ -117,3 +117,14 @@
     flex-direction: column;
   }
 }
+
+
+/* The reply as it streams in: same shape as a stored message, but marked as
+   still arriving so a half-written answer is never mistaken for a finished one. */
+.streamingReply {
+  padding-top: var(--space-md);
+}
+
+.streamingReply .messageTime {
+  font-style: italic;
+}

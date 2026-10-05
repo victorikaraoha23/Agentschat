@@ -21,7 +21,9 @@ export function ConversationMessageList({ messages }: ConversationMessageListPro
       {messages.map((message) => (
         <li key={message.id} className={styles.message}>
           <p className={styles.messageMeta}>
-            <span className={styles.messageAuthor}>You</span>
+            <span className={styles.messageAuthor}>
+              {message.role === "assistant" ? "Assistant" : "You"}
+            </span>
             <time dateTime={message.createdAt} className={styles.messageTime}>
               {formatMessageTime(message.createdAt)}
             </time>

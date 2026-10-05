@@ -132,10 +132,37 @@ agent, model, tool, settings, sharing, conversation lists, and search are **not*
 screens belong to later tasks.
 
 `chat-composer.tsx` is the composer: a labelled `textarea` and a real `Send` button, disabled while the
-draft holds no text. **It sends nothing.** Its rules live in the pure `lib/conversation-composer.ts`:
-submitting shows `COMPOSER_NOTICE_MESSAGE` ("messages are not sent yet") in a status region and keeps the
-typed draft, because nothing was delivered — no request, no stored message, no simulated reply. The rules
-are unit-tested; the component only renders them.
+draft holds no text. Sending is the page's job, and it now goes through the streaming endpoint. The
+composer's own rules live in the pure `lib/conversation-composer.ts`: a confirmed send clears the
+draft, a failed one keeps it, because nothing was delivered and throwing the text away would lose
+work. They are unit-tested; the component only renders them.
+
+## Streaming the reply (Task 8.3)
+
+Sending now calls `streamExecution` in `lib/execution-stream.ts`, which POSTs to
+`POST /conversations/{id}/execute/stream` and reads the reply as Server-Sent Events. `EventSource`
+cannot be used here because the request is a POST with a body and an `Authorization` header, so the
+module reads a `fetch` response body through `ReadableStream` and parses the framing itself.
+
+`ExecutionEventParser` is the part worth knowing about: one network chunk is not one event, so bytes
+are buffered until a blank line closes a frame. The tests feed the same body in deliberately awkward
+pieces -- split mid-JSON, split between `event:` and `data:`, two events in one chunk -- because that
+is the failure a streaming reader actually has. An event it cannot read is skipped rather than guessed
+at, so nothing reaches the conversation that the server never said.
+
+The page keeps the reply in local state through the pure transitions in `lib/conversation-thread.ts`:
+
+| `streamStatus` | When | What the user sees |
+|---|---|---|
+| `idle` | nothing in flight | the composer, ready |
+| `streaming` | the run is in flight | the accumulated reply under an "Assistant / replying" label; Send is disabled |
+| `completed` | the API confirmed the stored message | the reply as a normal message in the thread |
+| `error` | the run or the store failed | a fixed error message; the composer is usable again |
+
+`streamingContent` is deliberately **not** part of `messages` while it streams. A reply that fails
+half way has produced text the server never stored, so `streamFailed` discards it rather than leaving
+an unfinished answer in the thread. On completion the page appends the message the API persisted, so
+what is on screen is what a reload would show.
 
 Layout is one column, in the route's scoped stylesheet (`conversation.module.css`): header at the top, a
 growing message area, composer at the bottom, all reading the existing tokens from `app/globals.css`.

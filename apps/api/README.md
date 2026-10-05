@@ -306,6 +306,53 @@ Tests swap a fake runtime in through `get_agent_runtime`, so the normal suite ne
 each failure translation, and leak resistance; `tests/test_assistant_persistence.py` covers what
 happens to the reply afterwards.
 
+## Streamed execution (Task 8.3)
+
+`POST /conversations/{conversation_id}/execute/stream` answers Server-Sent Events instead of one JSON
+body, so the reply can be shown as it is produced. The transport is SSE rather than WebSockets
+because the request is a POST with a JSON body and an `Authorization` header, which the browser's
+`EventSource` cannot send; the client reads a `fetch` response body and parses the framing. Nothing
+else was introduced: the stream runs inside the normal FastAPI request lifecycle, with no queue, no
+broker, and no background worker.
+
+Everything before the first byte of the stream is identical to the buffered endpoint -- the same
+body model, the same verified identity, and the same owner-scoped user-message write that is also the
+ownership check. Those steps run first, so an unauthenticated caller, a foreign conversation, and
+invalid content are still ordinary HTTP errors rather than a stream that fails after it opens.
+
+The protocol is three events, matching the runtime contract's three event kinds:
+
+```
+event: delta
+data: {"content":"Hello"}
+
+event: complete
+data: {"message_id":"..."}
+
+event: error
+data: {"code":"failed","message":"The agent run failed."}
+```
+
+Payloads are JSON, so a reply containing newlines cannot break the framing. The `code` values are the
+runtime contract's `RuntimeFailureReason`, plus `assistant-persist-failed` and `not-found` for the two
+failures that belong to this endpoint. Only fixed application wording is ever sent: Hermes event
+records, exit codes, and error text stay server-side.
+
+**Persistence.** The user's message is stored before the run starts. Deltas are forwarded and
+accumulated in memory, but **nothing is written until the run completes**: a run that fails half way
+has produced text that is not an answer, and the database represents completed responses only. The
+single terminal event decides everything -- `complete` means exactly one assistant message was stored,
+`error` means none was.
+
+**Cancellation.** A browser disconnect closes the stream, which ends the adapter's generator, whose
+`finally` terminates the child process. No detached task keeps reading Hermes, and nothing is stored
+for a reply nobody received.
+
+The Hermes adapter reads the child's stdout a line at a time instead of waiting for it to exit, so
+each `text` record becomes a delta immediately. Only `text` records are forwarded; `system`,
+`tool_use`, `tool_result`, and `result` stay inside the adapter, and the terminal `result` record is
+what decides success or failure -- exactly as in the buffered path.
+
 ## Assistant messages (Task 8.2)
 
 `public.messages.role` accepts `user` and `assistant` (migration `0004`). Assistant rows are written

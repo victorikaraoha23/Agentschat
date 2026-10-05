@@ -13,8 +13,9 @@ import type { ChatSubmitOutcome } from "@/lib/conversation-composer";
 import {
   beginMessageSubmit,
   initialThreadState,
-  messageSubmitted,
-  messageSubmitFailed,
+  streamCompleted,
+  streamDelta,
+  streamFailed,
   type ConversationThreadState,
 } from "@/lib/conversation-thread";
 import type {
@@ -23,7 +24,7 @@ import type {
 } from "@/lib/conversation-view";
 import { conversationTitle, toConversationPageView } from "@/lib/conversation-view";
 import { getConversation, type ConversationResult } from "@/lib/conversations-api";
-import { createMessage } from "@/lib/messages-api";
+import { streamExecution } from "@/lib/execution-stream";
 import { toShellAccess } from "@/lib/shell-access";
 
 const DENIED_MESSAGES: Record<ConversationPageDeniedReason, string> = {
@@ -115,13 +116,36 @@ export function ConversationPage({ conversationId }: ConversationPageProps) {
       // The thread rules refuse a second submit while one is in flight, so a
       // double click or an impatient Enter cannot send the same text twice.
       setThread(beginMessageSubmit);
-      const result = await createMessage({ conversationId, content });
-      if (result.ok) {
-        setThread((state) => messageSubmitted(state, result.message));
-        return { ok: true, message: "" };
+
+      const outcome = await streamExecution({
+        conversationId,
+        content,
+        onEvent: (event) => {
+          if (event.kind === "delta") {
+            setThread((state) => streamDelta(state, event.content));
+          }
+        },
+      });
+
+      if (!outcome.ok) {
+        setThread((state) => streamFailed(state, outcome.message));
+        return { ok: false, message: outcome.message };
       }
-      setThread((state) => messageSubmitFailed(state, result.message));
-      return { ok: false, message: result.message };
+
+      // The reply now exists server-side. The page shows the row the API
+      // persisted rather than the accumulated text, so what is on screen is what
+      // a reload will show too.
+      setThread((state) =>
+        streamCompleted(state, {
+          id: outcome.messageId,
+          conversationId,
+          userId: "",
+          role: "assistant",
+          content: outcome.content,
+          createdAt: new Date().toISOString(),
+        }),
+      );
+      return { ok: true, message: "" };
     },
     [conversationId],
   );
@@ -201,13 +225,25 @@ export function ConversationPage({ conversationId }: ConversationPageProps) {
     <main className={styles.workspace}>
       <ConversationHeader title={conversationTitle(view.conversation)} />
       <section className={`${styles.messageArea} surface`} aria-label="Messages">
-        {thread.messages.length === 0 ? (
+        {thread.messages.length === 0 && thread.streamingContent === "" ? (
           <ConversationEmptyState />
         ) : (
           <ConversationMessageList messages={thread.messages} />
         )}
+        {thread.streamingContent !== "" && (
+          <div className={styles.streamingReply}>
+            <p className={styles.messageMeta}>
+              <span className={styles.messageAuthor}>Assistant</span>
+              <span className={styles.messageTime}>replying</span>
+            </p>
+            <p className={styles.messageContent}>{thread.streamingContent}</p>
+          </div>
+        )}
       </section>
-      <ChatComposer submitting={thread.submitting} onSubmit={sendMessage} />
+      <ChatComposer
+        submitting={thread.submitting}
+        onSubmit={sendMessage}
+      />
       {thread.error !== null && (
         <p className="status-error" role="alert">
           {thread.error}

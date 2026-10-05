@@ -375,6 +375,31 @@
   half. Frontend logging was reviewed and deliberately left unchanged: the single API-call module already
   returns typed failures with fixed UI text, so there is nothing useful to log and production console output
   stays quiet.
+- 2026-10-05: Task 8.3 added a streaming path rather than replacing the buffered one.
+  `POST /conversations/{id}/execute/stream` answers SSE: the browser's `EventSource` cannot send a
+  POST body or an `Authorization` header, so the client reads a `fetch` body and parses the framing,
+  and SSE is still the simplest one-way transport that needs no extra service. The runtime contract
+  gained `stream()` plus `RuntimeStreamEvent` with three kinds (delta / completed / failed); the
+  adapter reads the child's stdout a line at a time so Hermes `text` records become deltas
+  immediately, while the terminal `result` record still decides the outcome through the same
+  `_outcome_of` the buffered path uses. Only `text` records cross the boundary -- `system`,
+  `tool_use`, `tool_result`, `session_id` and token counts stay inside the adapter.
+- 2026-10-05: Partial output is never persisted. Deltas are forwarded and accumulated in memory, and
+  the single terminal event decides whether anything is written: `complete` stores exactly one
+  assistant message, `error` stores none. A run that failed half way has produced text that is not an
+  answer, so there is no `partial` message state and the conversation represents completed responses
+  only. The frontend mirrors this by keeping streamed text out of `messages` until the API confirms
+  the stored row.
+- 2026-10-05: A browser disconnect cancels the adapter's generator, whose `finally` terminates the
+  child and cancels the stderr drain. No detached task keeps reading Hermes and no background
+  infrastructure was added -- the stream lives entirely inside the normal FastAPI request lifecycle.
+- 2026-10-05: The frontend stream parser buffers until a blank line closes a frame, because one
+  network chunk is not one event; it can be split mid-JSON or between the `event:` and `data:` lines.
+  Unreadable frames are skipped rather than shown, so nothing enters the conversation that the server
+  never said.
+- 2026-10-05: Task 8.3 superseded the buffered composer submit on the conversation page, so
+  `messageSubmitted` / `messageSubmitFailed` were removed as dead code and the thread transitions are
+  now the streaming ones (`streamDelta`, `streamCompleted`, `streamFailed`).
 - 2026-10-05: Task 8.2 widened `public.messages.role` with a migration rather than editing the
   0003 check in place: `0004_allow_assistant_message_role.sql` drops `messages_role_user_only` and adds
   `messages_role_user_or_assistant check (role in ('user','assistant'))`. Replacing rather than altering

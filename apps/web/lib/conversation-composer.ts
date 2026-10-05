@@ -1,14 +1,14 @@
 /**
- * Composer rules for the conversation page (Task 6.2).
+ * Composer rules for the conversation page (Tasks 6.2 and 8.3).
  *
  * The composer owns one thing: the text the user has typed. Everything about
  * sending is a rule in this file, so the important behaviour is testable
  * without a browser:
  *
  * - Send is available only for a draft with actual text.
- * - A **successful** submit clears the draft, because the message is stored and
+ * - A **successful** send clears the draft, because the message is stored and
  *   the next one should start fresh.
- * - A **failed** submit keeps the draft. Nothing was stored, so throwing the
+ * - A **failed** send keeps the draft. Nothing was stored, so throwing the
  *   text away would lose work and imply a delivery that never happened
  *   (root `AGENTS.md` §13: never report success for an unknown outcome).
  *
