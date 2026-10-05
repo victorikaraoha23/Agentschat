@@ -1,8 +1,8 @@
 # Active Context
 
-- **Date:** 2026-10-03 (Task 6.1 session: Conversation Page — Phase 6 has started). Checkout branch `update`.
-- **Current task:** Task 6.1 (Conversation Page) is **complete**. The next task, 6.2 (persisting user
-  messages), must not begin without an explicit instruction.
+- **Date:** 2026-10-05 (Task 8.3: streaming execution and review fixes).
+- **Current task:** Task 8.3 (streaming and frontend execution) is **implemented**. The conversation
+  page calls `POST .../execute/stream`, displays streamed output and confirms the persisted reply.
 - **What was done:**
   - **Task 0.1 (2026-09-22):** rewrote root `AGENTS.md` as the AgentsChat engineering constitution
     (mission, separation of concerns, dependency direction, simplicity, atomic dev, type safety, API,
@@ -213,6 +213,18 @@
       on `user_id`, and a `before update` trigger `handle_conversations_updated_at`) with RLS enabled and
       four owner-scoped policies on `auth.uid() = user_id`; the insert policy's `with check` rejects a
       client-supplied `user_id`, so the policies fail closed.
+    - **Task 8.2 (2026-10-05)** assistant response persistence. `supabase/migrations/
+      0004_allow_assistant_message_role.sql` drops `messages_role_user_only` and adds
+      `messages_role_user_or_assistant check (role in ('user','assistant'))` -- existing rows stay
+      valid, no policy or grant changes, and `system`/`tool`/`function`/`agent` stay refused.
+      `app/messages.py` gained `create_assistant_for_user`; both public writes now delegate to one
+      private `_insert_owned_message`, so an assistant row has no looser path that skips the
+      owner-scoped conversation read. `POST .../execute` now answers with `ExecutionResponse`
+      (`status`/`content`/`message_id`) and returns `content` read back from the persisted row. A
+      reply that cannot be stored answers `503`, never a completion.
+    - **Task 8.1 (2026-10-05, commit `90e3ecbdf4`)** `POST /conversations/{conversation_id}/execute` --
+      verified identity -> owner-scoped user-message persistence -> `RuntimeRequest` -> `AgentRuntime`
+      -> typed result, with one run per request and the four runtime failures mapped to fixed details.
 - **Open questions / pending user input:**
   - The root `package.json` npm workspace glob (`apps/*`) still matches `apps/web`. Task 1.1 decided the app is
     an independent package (`npm install --workspaces=false`); narrowing the glob remains an explicitly scoped
@@ -221,10 +233,14 @@
     Hermes README), and should `apps/desktop/README.md`'s `../../README.md` link follow it?
 - **Next steps:**
   - Start the next task only on explicit instruction; read the root `AGENTS.md`, `apps/api/README.md`, and
-    `apps/web/README.md` first. Task 6.2 (persisting user messages) is the next planned task and has
-    **not** been started.
-  - Phase 6 so far is frontend-only: no message table, message endpoint, message service, or repository
-    exists anywhere in the repository, and no Hermes adapter exists either.
+    `apps/web/README.md` first. Task 8.3 streaming and frontend execution are implemented.
+  - The user -> agent -> reply loop now includes the frontend: `POST .../execute/stream` confirms
+    the user row, streams provisional deltas, then confirms the persisted assistant row. Navigation
+    aborts active submissions and releases runtime resources. Message-history retrieval remains
+    a later task; the page shows messages from the current visit.
+  - Conversation continuity is still absent: the Hermes adapter uses a disposable workspace per run
+    (Task 7.2), so `conversation_id` is passed in the contract but no agent session survives between
+    turns. Resuming per conversation needs a durable per-run workspace and is its own task.
   - `memory-bank/` was brought up to date on 2026-10-03: the previously missing task entries (3.1, 4.1, 4.2,
     5.1) were backfilled here and in `progress.md`, and the four Hermes-oriented files
     (`projectbrief.md`, `productContext.md`, `systemPatterns.md`, `techContext.md`) now carry an

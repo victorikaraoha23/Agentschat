@@ -16,3 +16,5 @@ in the migration's header comment.
 | --- | --- |
 | `migrations/0001_create_profiles.sql` | `public.profiles` (id = `auth.users.id`), RLS, creation trigger |
 | `migrations/0002_create_conversations.sql` | `public.conversations` (uuid id, `user_id` → `profiles.id`), RLS, owner index |
+| `migrations/0003_create_messages.sql` | `public.messages` (uuid id, `conversation_id` → `conversations.id`), RLS, conversation activity trigger |
+| `migrations/0004_allow_assistant_message_role.sql` | Widens `messages.role` to `user` or `assistant` (Task 8.2); existing rows and RLS policies unchanged |

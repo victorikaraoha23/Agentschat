@@ -11,12 +11,15 @@ until a run is actually requested nothing calls it, and the API starts and
 serves exactly as before with no Hermes process or credentials present.
 
 The contract is deliberately small: who is asking, in which conversation,
-and what they said. Tools, files, memory, model parameters, billing,
-retries, and streaming do not exist in the product yet.
+and what they said. A run may also be *streamed* (:meth:`AgentRuntime.stream`),
+which reports the same three application values as events instead of one final
+result. Tools, files, memory, model parameters, billing, retries, and streaming
+of anything other than the reply text do not exist in the product yet.
 """
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from enum import Enum
 from typing import Annotated, Final, Protocol
 from uuid import UUID
@@ -93,11 +96,62 @@ class RuntimeResult(BaseModel):
         return self
 
 
+class RuntimeStreamEventKind(str, Enum):
+    """The three things a streamed run can report (Task 8.3).
+
+    Deliberately tiny. A stream needs to say "here is more text", "that is the
+    whole reply", or "this run failed" -- and nothing else. Tool activity, token
+    counts, reasoning, and provider detail have no product meaning yet, so they
+    are not modelled rather than modelled and ignored.
+    """
+
+    DELTA = "delta"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class RuntimeStreamEvent(BaseModel):
+    """One event of a streamed run, in application terms only.
+
+    ``content`` carries the new text for a ``DELTA`` and the complete reply for
+    ``COMPLETED``. A ``FAILED`` event carries a reason instead of content, and the
+    implementation's own error text stays on the server (root ``AGENTS.md`` §13).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: RuntimeStreamEventKind
+    content: str = Field(default="")
+    reason: RuntimeFailureReason | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def _check_event_shape(self) -> RuntimeStreamEvent:
+        """Keep failures and non-failures in their distinct shapes."""
+        if self.kind is RuntimeStreamEventKind.FAILED and self.reason is None:
+            raise ValueError("A failed stream event must carry a failure reason.")
+        if self.kind is not RuntimeStreamEventKind.FAILED and self.reason is not None:
+            raise ValueError("Only a failed stream event carries a failure reason.")
+        return self
+
+
 class AgentRuntime(Protocol):
-    """Application-facing runtime capability used by future execution paths."""
+    """Application-facing runtime capability used by execution paths."""
 
     async def execute(self, request: RuntimeRequest) -> RuntimeResult:
         """Run one agent request and return its application-level outcome."""
+        ...  # pragma: no cover - contract only
+
+    def stream(self, request: RuntimeRequest) -> AsyncGenerator[RuntimeStreamEvent, None]:
+        """Run one agent request, yielding events as they become available.
+
+        The async generator form matters: a run may involve model calls,
+        subprocesses, and network work, so the adapter must be able to yield
+        between them without blocking the request. Implementations always finish
+        with exactly one terminal event (``COMPLETED`` or ``FAILED``), which is
+        what tells the caller whether a complete reply exists. Callers close the
+        generator to release runtime resources when streaming stops. Implementations
+        must shield asynchronous cleanup when a pending read is cancelled.
+        """
         ...  # pragma: no cover - contract only
 
 
@@ -109,6 +163,20 @@ class _UnavailableRuntime:
             ok=False,
             reason=RuntimeFailureReason.UNAVAILABLE,
             message=RUNTIME_UNAVAILABLE_MESSAGE,
+        )
+
+    async def stream(
+        self, request: RuntimeRequest
+    ) -> AsyncGenerator[RuntimeStreamEvent, None]:
+        """Fail immediately rather than pretending to stream an answer.
+
+        A stream that opened and never produced anything would leave the caller
+        waiting with no way to tell what happened; one failed event says it at
+        once, in the same wording `execute` uses.
+        """
+        yield RuntimeStreamEvent(
+            kind=RuntimeStreamEventKind.FAILED,
+            reason=RuntimeFailureReason.UNAVAILABLE,
         )
 
 

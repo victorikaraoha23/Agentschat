@@ -1,16 +1,19 @@
 """AgentsChat FastAPI application: health, identity, conversations, messages, and execution."""
 
-from collections.abc import AsyncIterator
+import json
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated
 from uuid import UUID
 
+from anyio import CancelScope
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from httpx import HTTPError
 from pydantic import BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
+from starlette.types import Send
 from supabase import PostgrestAPIError, SupabaseException
 
 from app.auth import AuthenticatedUser, require_authenticated_user
@@ -37,10 +40,13 @@ from app.runtime import (
     RUNTIME_INVALID_REQUEST_MESSAGE,
     RUNTIME_TIMED_OUT_MESSAGE,
     RUNTIME_UNAVAILABLE_MESSAGE,
+    AgentRuntime,
     AgentRuntimeDep,
     RuntimeFailureReason,
     RuntimeRequest,
     RuntimeResult,
+    RuntimeStreamEvent,
+    RuntimeStreamEventKind,
 )
 from app.supabase_client import (
     SupabaseNotConfiguredError,
@@ -432,9 +438,26 @@ _RUNTIME_FAILURE_RESPONSES: dict[RuntimeFailureReason, tuple[int, str]] = {
 }
 
 
+#: Status of a completed execution. Failures never reach the body as a success:
+#: they are raised as HTTPExceptions carrying the fixed per-reason detail.
+EXECUTION_COMPLETED_STATUS = "completed"
+
+ASSISTANT_PERSIST_FAILED_DETAIL = "The agent reply could not be saved."
+
+
+class ExecutionResponse(BaseModel):
+    """Answer to a successful ``POST /conversations/{id}/execute``."""
+
+    status: str = Field(
+        description="Always \"completed\"; failures use HTTP error statuses."
+    )
+    content: str = Field(description="The assistant reply, as persisted.")
+    message_id: UUID = Field(description="Id of the persisted assistant message.")
+
+
 @app.post(
     "/conversations/{conversation_id}/execute",
-    response_model=RuntimeResult,
+    response_model=ExecutionResponse,
     status_code=status.HTTP_200_OK,
 )
 async def execute_user_message(
@@ -443,19 +466,24 @@ async def execute_user_message(
     user: Annotated[AuthenticatedUser, Depends(require_authenticated_user)],
     store: Annotated[SupabaseMessageStore, Depends(get_message_store)],
     runtime: AgentRuntimeDep,
-) -> RuntimeResult:
-    """Persist the caller's message, run it through the agent runtime, and answer with its result.
+) -> ExecutionResponse:
+    """Persist the caller's message, run it, then persist the runtime's reply.
 
-    The first real execution path (Task 8.1): verified identity → owner-scoped
-    persistence → contract request → ``AgentRuntime`` → typed result. The
-    handler talks only to the runtime interface; reaching Hermes is entirely
+    Verified identity -> owner-scoped user-message persistence -> contract
+    request -> ``AgentRuntime`` -> owner-scoped assistant-message persistence.
+    The handler talks only to the runtime interface; reaching Hermes is entirely
     the adapter's business behind it (root AGENTS.md §3, §11).
 
     Persistence deliberately comes first, so the user's request is part of the
     conversation even when the run subsequently fails: a failed run leaves the
-    user message in place, writes no assistant message (a later task owns that),
-    and is not retried. Exactly one run happens per HTTP request — full
-    idempotency for a client that submits twice is deferred.
+    user message in place, writes no assistant message, and is not retried.
+    Exactly one run happens per HTTP request -- full idempotency for a client
+    that submits twice is deferred.
+
+    The assistant message is written only after a successful run and is owned by
+    the caller's verified identity, never by anything the runtime reported. If
+    that write fails the caller gets an error rather than a completion that did
+    not happen.
 
     The body reuses :class:`CreateMessageRequest`, so execution enforces
     byte-for-byte the same validation as ``POST .../messages`` (missing, empty,
@@ -522,7 +550,256 @@ async def execute_user_message(
         status_code, detail = _RUNTIME_FAILURE_RESPONSES[reason]
         raise HTTPException(status_code=status_code, detail=detail)
 
-    return result
+    # 4. Persist the reply as a second message in the same conversation, owned
+    #    by the same verified identity (never by anything the runtime said). A
+    #    failure here is not swallowed: reporting success would leave the user's
+    #    message with no reply and no signal that anything went wrong.
+    try:
+        assistant_message = await run_in_threadpool(
+            store.create_assistant_for_user,
+            user.user_id, str(conversation_id), result.output
+        )
+    except (
+        MessageCreateError,
+        PostgrestAPIError,
+        SupabaseException,
+        SupabaseNotConfiguredError,
+        HTTPError,
+    ) as exc:
+        logger.exception(
+            "Assistant message could not be persisted "
+            "(conversation_id=%s): %s",
+            conversation_id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=ASSISTANT_PERSIST_FAILED_DETAIL,
+        ) from exc
+
+    # The conversation was verified moments ago by the user-message write, so a
+    # missing row here means the conversation disappeared underneath us. The
+    # same 404 as before says nothing about who owns it.
+    if assistant_message is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=CONVERSATION_NOT_FOUND_DETAIL,
+        )
+
+    return ExecutionResponse(
+        status=EXECUTION_COMPLETED_STATUS,
+        content=assistant_message.content,
+        message_id=assistant_message.id,
+    )
+
+# --- Streamed execution (Task 8.3) --------------------------------------------
+#
+# Server-Sent Events is the transport because the request is a POST with a JSON
+# body and an Authorization header, which the browser's `EventSource` cannot
+# send; the client therefore reads a `fetch` response body and parses the event
+# framing itself. SSE is still the right shape: one-way, plain HTTP, no extra
+# service, no second protocol (root AGENTS.md §4).
+_STREAM_MEDIA_TYPE = "text/event-stream"
+
+#: Application events include the confirmed user message before runtime output.
+STREAM_EVENT_START = "start"
+STREAM_EVENT_DELTA = "delta"
+STREAM_EVENT_COMPLETE = "complete"
+STREAM_EVENT_ERROR = "error"
+
+
+def _sse(event: str, data: dict[str, object]) -> str:
+    """Encode one Server-Sent Event.
+
+    The payload is JSON, so a delta containing a newline or a quote is escaped
+    rather than breaking the framing, and `data:` can never be split into a
+    second event by the content itself.
+    """
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+
+class ExecutionStreamingResponse(StreamingResponse):
+    """Close the body even when sending a chunk fails or the client disconnects."""
+
+    body_iterator: AsyncGenerator[str, None]
+
+    async def stream_response(self, send: Send) -> None:
+        try:
+            await super().stream_response(send)
+        finally:
+            # Starlette cancels streaming on disconnect; cleanup must still finish.
+            with CancelScope(shield=True):
+                await self.body_iterator.aclose()
+
+
+async def _stream_execution_events(
+    conversation_id: UUID,
+    request: RuntimeRequest,
+    user_id: str,
+    store: SupabaseMessageStore,
+    runtime: AgentRuntime,
+    user_message: Message,
+) -> AsyncGenerator[str, None]:
+    """Forward one run's events as SSE, persisting the reply only if it completed.
+
+    Deltas are forwarded as they arrive, but nothing is written until the runtime
+    reports completion: a run that fails half way has produced text that is not an
+    answer, and storing it would put an incomplete reply in the conversation as
+    though it were finished (root AGENTS.md §10).
+
+    Exactly one terminal event is emitted. If persisting the completed reply then
+    fails, that is a terminal error rather than a success, because the run's
+    output exists but is not in the conversation.
+    """
+    yield _sse(STREAM_EVENT_START, {"message": user_message.model_dump(mode="json")})
+    terminal: RuntimeStreamEvent | None = None
+    try:
+        events = runtime.stream(request)
+        try:
+            async for event in events:
+                if event.kind is RuntimeStreamEventKind.DELTA:
+                    yield _sse(STREAM_EVENT_DELTA, {"content": event.content})
+                else:
+                    terminal = event
+                    break
+        finally:
+            with CancelScope(shield=True):
+                await events.aclose()
+    except Exception:
+        logger.exception(
+            "Streamed agent execution raised (conversation_id=%s).", conversation_id
+        )
+        terminal = None
+
+    # Cleanup precedes persistence and the terminal event, including early EOF.
+    if terminal is None or terminal.kind is RuntimeStreamEventKind.FAILED:
+        reason = (terminal.reason if terminal else None) or RuntimeFailureReason.FAILED
+        logger.warning(
+            "Streamed agent execution failed (conversation_id=%s, reason=%s).",
+            conversation_id,
+            reason.value,
+        )
+        _status, detail = _RUNTIME_FAILURE_RESPONSES[reason]
+        yield _sse(STREAM_EVENT_ERROR, {"code": reason.value, "message": detail})
+        return
+
+    event = terminal
+    # COMPLETED: the run produced a whole reply, so it may be stored.
+    try:
+        assistant_message = await run_in_threadpool(
+            store.create_assistant_for_user,
+            user_id,
+            str(conversation_id),
+            event.content,
+        )
+    except (
+        MessageCreateError,
+        PostgrestAPIError,
+        SupabaseException,
+        SupabaseNotConfiguredError,
+        HTTPError,
+    ) as exc:
+        logger.exception(
+            "Streamed assistant message could not be persisted "
+            "(conversation_id=%s): %s",
+            conversation_id,
+            exc,
+        )
+        yield _sse(
+            STREAM_EVENT_ERROR,
+            {
+                "code": "assistant-persist-failed",
+                "message": ASSISTANT_PERSIST_FAILED_DETAIL,
+            },
+        )
+        return
+
+    if assistant_message is None:
+        yield _sse(
+            STREAM_EVENT_ERROR,
+            {"code": "not-found", "message": CONVERSATION_NOT_FOUND_DETAIL},
+        )
+        return
+
+    yield _sse(STREAM_EVENT_COMPLETE, {
+        "message_id": str(assistant_message.id),
+        "content": assistant_message.content,
+        "message": assistant_message.model_dump(mode="json"),
+    })
+    return
+
+
+
+
+@app.post(
+    "/conversations/{conversation_id}/execute/stream",
+    response_class=StreamingResponse,
+    responses={status.HTTP_200_OK: {"content": {"text/event-stream": {}}}},
+)
+async def stream_execution(
+    conversation_id: UUID,
+    body: CreateMessageRequest,
+    user: Annotated[AuthenticatedUser, Depends(require_authenticated_user)],
+    store: Annotated[SupabaseMessageStore, Depends(get_message_store)],
+    runtime: AgentRuntimeDep,
+) -> StreamingResponse:
+    """Persist the caller's message, then stream the agent's reply as it arrives.
+
+    Everything up to the first byte of the stream is the same as the buffered
+    execution endpoint: the same body model and therefore the same validation,
+    the same verified identity, and the same owner-scoped user-message write that
+    is also the ownership check. Those steps run *before* the response starts, so
+    an unauthenticated caller, a foreign conversation, and invalid content still
+    produce ordinary HTTP errors rather than a stream that fails after it opens.
+
+    Once streaming begins the outcome travels as events, because a 200 has already
+    been sent. The events carry persisted messages and runtime outcomes; Hermes event
+    records, exit codes, and error text never reach the browser.
+    """
+    try:
+        message = await run_in_threadpool(
+            store.create_for_user, user.user_id, str(conversation_id), body.content
+        )
+    except MessageCreateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=MESSAGE_CREATE_UNAVAILABLE_DETAIL,
+        ) from exc
+    except (
+        PostgrestAPIError,
+        SupabaseException,
+        SupabaseNotConfiguredError,
+        HTTPError,
+    ) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=MESSAGE_CREATE_UNAVAILABLE_DETAIL,
+        ) from exc
+
+    if message is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=CONVERSATION_NOT_FOUND_DETAIL,
+        )
+
+    runtime_request = RuntimeRequest(
+        user_id=UUID(user.user_id),
+        conversation_id=conversation_id,
+        content=message.content,
+    )
+
+    return ExecutionStreamingResponse(
+        _stream_execution_events(
+            conversation_id, runtime_request, user.user_id, store, runtime, message
+        ),
+        media_type=_STREAM_MEDIA_TYPE,
+        headers={
+            # A proxy that buffers the response would defeat the point of it.
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)

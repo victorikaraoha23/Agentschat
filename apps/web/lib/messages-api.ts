@@ -40,7 +40,7 @@ export interface CreateMessageRequestOptions {
   accessToken?: string | null;
   fetchImpl?: FetchLike;
 }
-function isMessagePayload(body: unknown): body is MessagePayload {
+export function isMessagePayload(body: unknown): body is MessagePayload {
   if (typeof body !== "object" || body === null) {
     return false;
   }
@@ -54,7 +54,7 @@ function isMessagePayload(body: unknown): body is MessagePayload {
     typeof r.created_at === "string"
   );
 }
-function toMessage(payload: MessagePayload): Message {
+export function toMessage(payload: MessagePayload): Message {
   return {
     id: payload.id,
     conversationId: payload.conversation_id,

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ChatComposer } from "./chat-composer";
 import styles from "./conversation.module.css";
@@ -13,8 +13,10 @@ import type { ChatSubmitOutcome } from "@/lib/conversation-composer";
 import {
   beginMessageSubmit,
   initialThreadState,
-  messageSubmitted,
-  messageSubmitFailed,
+  streamCompleted,
+  streamDelta,
+  streamFailed,
+  streamStarted,
   type ConversationThreadState,
 } from "@/lib/conversation-thread";
 import type {
@@ -23,7 +25,7 @@ import type {
 } from "@/lib/conversation-view";
 import { conversationTitle, toConversationPageView } from "@/lib/conversation-view";
 import { getConversation, type ConversationResult } from "@/lib/conversations-api";
-import { createMessage } from "@/lib/messages-api";
+import { streamExecution } from "@/lib/execution-stream";
 import { toShellAccess } from "@/lib/shell-access";
 
 const DENIED_MESSAGES: Record<ConversationPageDeniedReason, string> = {
@@ -58,8 +60,8 @@ export interface ConversationPageProps {
  * failure.
  *
  * A message is shown only after the API confirms it was stored, so the
- * conversation never contains something that does not exist. This task stops at
- * persistence: no agent runs, no reply is produced, and nothing is streamed.
+ * conversation never contains something that does not exist. Execution streams
+ * provisional deltas, then confirms the persisted assistant row.
  */
 export function ConversationPage({ conversationId }: ConversationPageProps) {
   const [session, setSession] = useState<SessionState | null>(null);
@@ -73,6 +75,16 @@ export function ConversationPage({ conversationId }: ConversationPageProps) {
   } | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [thread, setThread] = useState<ConversationThreadState>(initialThreadState);
+
+  const activeSubmission = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      activeSubmission.current?.abort();
+      activeSubmission.current = null;
+      setThread(initialThreadState());
+    };
+  }, [conversationId]);
 
   useEffect(() => {
     let userId: string | null = null;
@@ -112,16 +124,42 @@ export function ConversationPage({ conversationId }: ConversationPageProps) {
 
   const sendMessage = useCallback(
     async (content: string): Promise<ChatSubmitOutcome> => {
-      // The thread rules refuse a second submit while one is in flight, so a
-      // double click or an impatient Enter cannot send the same text twice.
-      setThread(beginMessageSubmit);
-      const result = await createMessage({ conversationId, content });
-      if (result.ok) {
-        setThread((state) => messageSubmitted(state, result.message));
-        return { ok: true, message: "" };
+      if (activeSubmission.current !== null) {
+        return { ok: false, message: "A reply is already in progress." };
       }
-      setThread((state) => messageSubmitFailed(state, result.message));
-      return { ok: false, message: result.message };
+      const controller = new AbortController();
+      activeSubmission.current = controller;
+      setThread(beginMessageSubmit);
+
+      const outcome = await streamExecution({
+        conversationId,
+        content,
+        signal: controller.signal,
+        onEvent: (event) => {
+          if (controller.signal.aborted) return;
+          if (event.kind === "start") {
+            setThread((state) => controller.signal.aborted
+              ? state : streamStarted(state, event.message));
+          } else if (event.kind === "delta") {
+            setThread((state) => controller.signal.aborted
+              ? state : streamDelta(state, event.content));
+          }
+        },
+      });
+
+      if (controller.signal.aborted) {
+        return { ok: false, message: "" };
+      }
+      activeSubmission.current = null;
+      if (!outcome.ok) {
+        setThread((state) => controller.signal.aborted
+          ? state : streamFailed(state, outcome.message));
+        return { ok: false, message: outcome.message };
+      }
+
+      setThread((state) => controller.signal.aborted
+        ? state : streamCompleted(state, outcome.message));
+      return { ok: true, message: "" };
     },
     [conversationId],
   );
@@ -201,13 +239,25 @@ export function ConversationPage({ conversationId }: ConversationPageProps) {
     <main className={styles.workspace}>
       <ConversationHeader title={conversationTitle(view.conversation)} />
       <section className={`${styles.messageArea} surface`} aria-label="Messages">
-        {thread.messages.length === 0 ? (
+        {thread.messages.length === 0 && thread.streamingContent === "" ? (
           <ConversationEmptyState />
         ) : (
           <ConversationMessageList messages={thread.messages} />
         )}
+        {thread.streamingContent !== "" && (
+          <div className={styles.streamingReply}>
+            <p className={styles.messageMeta}>
+              <span className={styles.messageAuthor}>Assistant</span>
+              <span className={styles.messageTime}>replying</span>
+            </p>
+            <p className={styles.messageContent}>{thread.streamingContent}</p>
+          </div>
+        )}
       </section>
-      <ChatComposer submitting={thread.submitting} onSubmit={sendMessage} />
+      <ChatComposer
+        submitting={thread.submitting}
+        onSubmit={sendMessage}
+      />
       {thread.error !== null && (
         <p className="status-error" role="alert">
           {thread.error}

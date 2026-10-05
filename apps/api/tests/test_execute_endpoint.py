@@ -49,6 +49,8 @@ CREATED_ROW: dict[str, object] = {
     "created_at": "2026-10-04T12:00:00Z",
 }
 
+ASSISTANT_ROW_ID = "423e4567-e89b-12d3-a456-426614174000"
+
 
 class RuntimeProbe(Protocol):
     """The runtime seam the endpoint exercises: recorded requests, one outcome."""
@@ -85,11 +87,16 @@ class FakeMessageStore:
         self,
         owns_conversation: bool = True,
         error: Exception | None = None,
+        assistant_error: Exception | None = None,
+        assistant_missing: bool = False,
     ) -> None:
         """Decide whether the caller owns the conversation, or raise an error."""
         self._owns_conversation = owns_conversation
         self._error = error
         self.writes: list[tuple[str, str, str]] = []
+        self.assistant_writes: list[tuple[str, str, str]] = []
+        self._assistant_error = assistant_error
+        self._assistant_missing = assistant_missing
 
     def create_for_user(
         self, user_id: str, conversation_id: str, content: str
@@ -104,6 +111,24 @@ class FakeMessageStore:
             **CREATED_ROW,
             "conversation_id": conversation_id,
             "user_id": user_id,
+            "content": content,
+        })
+
+    def create_assistant_for_user(
+        self, user_id: str, conversation_id: str, content: str
+    ) -> Message | None:
+        """Record the reply under the same ownership answer as the user write."""
+        self.assistant_writes.append((user_id, conversation_id, content))
+        if self._assistant_error is not None:
+            raise self._assistant_error
+        if not self._owns_conversation or self._assistant_missing:
+            return None
+        return Message.model_validate({
+            **CREATED_ROW,
+            "id": ASSISTANT_ROW_ID,
+            "conversation_id": conversation_id,
+            "user_id": user_id,
+            "role": "assistant",
             "content": content,
         })
 
@@ -197,9 +222,9 @@ def test_authenticated_request_succeeds(monkeypatch: pytest.MonkeyPatch) -> None
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["ok"] is True
-    assert payload["output"] == "fake assistant reply"
-    assert payload["reason"] is None
+    assert payload["status"] == "completed"
+    assert payload["content"] == "fake assistant reply"
+    assert payload["message_id"] == ASSISTANT_ROW_ID
     assert len(runtime.requests) == 1
 
 
@@ -225,6 +250,9 @@ def test_user_can_execute_in_their_own_conversation(
 
     assert response.status_code == 200
     assert store.writes == [(USER_ID, CONVERSATION_ID, "Hello")]
+    assert store.assistant_writes == [
+        (USER_ID, CONVERSATION_ID, "fake assistant reply")
+    ]
     request = runtime.requests[0]
     assert request.user_id == UUID(USER_ID)
     assert request.conversation_id == UUID(CONVERSATION_ID)
@@ -343,6 +371,12 @@ def test_persistence_runs_outside_the_event_loop(
             persistence_threads.append(get_ident())
             return super().create_for_user(user_id, conversation_id, content)
 
+        def create_assistant_for_user(
+            self, user_id: str, conversation_id: str, content: str
+        ) -> Message | None:
+            persistence_threads.append(get_ident())
+            return super().create_assistant_for_user(user_id, conversation_id, content)
+
     class ThreadRecordingRuntime(FakeSuccessRuntime):
         async def execute(self, request: RuntimeRequest) -> RuntimeResult:
             runtime_threads.append(get_ident())
@@ -357,8 +391,9 @@ def test_persistence_runs_outside_the_event_loop(
 
     assert response.status_code == 200
     assert store.writes == [(USER_ID, CONVERSATION_ID, "Hello")]
-    assert len(persistence_threads) == len(runtime_threads) == 1
-    assert persistence_threads[0] != runtime_threads[0]
+    assert len(persistence_threads) == 2
+    assert len(runtime_threads) == 1
+    assert all(thread != runtime_threads[0] for thread in persistence_threads)
 
 
 def test_message_is_persisted_before_the_runtime_runs(
