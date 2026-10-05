@@ -14,10 +14,14 @@ application's own dependency seams.
 
 from __future__ import annotations
 
+import asyncio
 import json
+from uuid import UUID
 from collections.abc import AsyncIterator
 
 import pytest
+from anyio import CancelScope
+from starlette.types import Message as ASGIMessage
 from fastapi.testclient import TestClient
 
 from app.auth import get_access_token_verifier
@@ -28,7 +32,7 @@ from app.main import (
     app,
     get_message_store,
 )
-from app.messages import MessageCreateError
+from app.messages import Message, MessageCreateError
 from app.runtime import (
     RUNTIME_FAILED_MESSAGE,
     RUNTIME_TIMED_OUT_MESSAGE,
@@ -47,6 +51,7 @@ from tests.fake_runtime import (
 from tests.test_execute_endpoint import (
     ASSISTANT_ROW_ID,
     CONVERSATION_ID,
+    CREATED_ROW,
     OTHER_USER_ID,
     USER_ID,
     FakeMessageStore,
@@ -159,8 +164,8 @@ def test_a_failed_run_emits_an_error_and_no_complete(
     )
 
     events = stream_events(response.text)
-    assert [name for name, _ in events] == ["error"]
-    assert events[0][1] == {"code": "failed", "message": RUNTIME_FAILED_MESSAGE}
+    assert [name for name, _ in events] == ["start", "error"]
+    assert events[-1][1] == {"code": "failed", "message": RUNTIME_FAILED_MESSAGE}
 
 
 @pytest.mark.parametrize(
@@ -234,7 +239,7 @@ def test_partial_output_is_shown_but_never_stored(
     )
 
     assert deltas(response.text) == [partial.partial]
-    assert event_names(response.text) == ["delta", "error"]
+    assert event_names(response.text) == ["start", "delta", "error"]
     assert store.writes == [(USER_ID, CONVERSATION_ID, "Hello")]
     assert store.assistant_writes == []
 
@@ -282,7 +287,7 @@ def test_a_vanished_conversation_is_reported_as_an_error(
     )
 
     assert deltas(response.text) == ["line one\nline two\n"]
-    assert event_names(response.text) == ["delta", "complete"]
+    assert event_names(response.text) == ["start", "delta", "complete"]
 
 
 def test_the_stream_path_is_separate_from_the_buffered_one() -> None:
@@ -390,7 +395,11 @@ def test_the_complete_event_carries_the_persisted_message_id(
     completes = [
         data for name, data in stream_events(response.text) if name == "complete"
     ]
-    assert completes == [{"message_id": ASSISTANT_ROW_ID}]
+    assert len(completes) == 1
+    assert completes[0]["message_id"] == ASSISTANT_ROW_ID
+    assert completes[0]["content"] == "fake assistant reply"
+    assert completes[0]["message"]["user_id"] == USER_ID
+    assert completes[0]["message"]["created_at"] == CREATED_ROW["created_at"]
 
 
 def test_the_reply_is_persisted_once_after_completion(
@@ -414,10 +423,10 @@ def test_exactly_one_run_occurs_per_request(monkeypatch: pytest.MonkeyPatch) -> 
 def test_no_hermes_event_vocabulary_reaches_the_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Only the three application event names may appear in the body."""
+    """Only application event names may appear in the body."""
     _store, _runtime, response = post_stream(monkeypatch, {"content": "Hello"})
 
-    assert set(event_names(response.text)) <= {"delta", "complete", "error"}
+    assert set(event_names(response.text)) <= {"start", "delta", "complete", "error"}
     for word in ("tool_use", "tool_result", "session_id", "tokens", "exit_code"):
         assert word not in response.text
 
@@ -431,4 +440,126 @@ def test_a_delta_containing_newlines_stays_one_event(
     )
 
     assert deltas(response.text) == ["line one\nline two\n"]
-    assert event_names(response.text) == ["delta", "complete"]
+    assert event_names(response.text) == ["start", "delta", "complete"]
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_missing_terminal_or_exception_produces_one_safe_error(
+    monkeypatch: pytest.MonkeyPatch, raises: bool,
+) -> None:
+    class BrokenRuntime(FakeSuccessRuntime):
+        async def stream(self, request: RuntimeRequest) -> AsyncIterator[RuntimeStreamEvent]:
+            yield RuntimeStreamEvent(kind=RuntimeStreamEventKind.DELTA, content="partial")
+            if raises:
+                raise RuntimeError("private runtime detail")
+
+    store, _, response = post_stream(monkeypatch, {"content": "Hello"}, runtime=BrokenRuntime())
+    assert event_names(response.text) == ["start", "delta", "error"]
+    assert stream_events(response.text)[-1][1] == {
+        "code": "failed", "message": RUNTIME_FAILED_MESSAGE,
+    }
+    assert "private runtime detail" not in response.text
+    assert not store.assistant_writes
+
+
+def test_start_and_completion_carry_persisted_rows_after_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    order: list[str] = []
+
+    class ClosingRuntime(FakeSuccessRuntime):
+        async def stream(self, request: RuntimeRequest) -> AsyncIterator[RuntimeStreamEvent]:
+            try:
+                yield RuntimeStreamEvent(kind=RuntimeStreamEventKind.DELTA, content="draft")
+                yield RuntimeStreamEvent(kind=RuntimeStreamEventKind.COMPLETED, content="final")
+                raise AssertionError("must stop at the first terminal event")
+            finally:
+                await asyncio.sleep(0)
+                order.append("closed")
+
+    class CanonicalStore(FakeMessageStore):
+        def create_assistant_for_user(
+            self, user_id: str, conversation_id: str, content: str,
+        ) -> Message | None:
+            assert order == ["closed"]
+            order.append("persisted")
+            row = super().create_assistant_for_user(user_id, conversation_id, content)
+            assert row is not None
+            return row.model_copy(update={"content": "stored final"})
+
+    store, _, response = post_stream(
+        monkeypatch, {"content": "Hello"}, store=CanonicalStore(), runtime=ClosingRuntime(),
+    )
+    events = stream_events(response.text)
+    assert events[0] == ("start", {"message": Message.model_validate({
+        **CREATED_ROW, "content": "Hello",
+    }).model_dump(mode="json")})
+    assert events[-1][0] == "complete"
+    assert events[-1][1]["content"] == "stored final"
+    assert events[-1][1]["message"]["content"] == "stored final"
+    assert order == ["closed", "persisted"]
+    assert store.assistant_writes == [(USER_ID, CONVERSATION_ID, "final")]
+
+
+@pytest.mark.parametrize("spec_version", ["2.0", "2.4"])
+@pytest.mark.parametrize("during_read", [False, True])
+def test_disconnect_closes_response_and_runtime_before_returning(
+    spec_version: str, during_read: bool,
+) -> None:
+    from app.main import ExecutionStreamingResponse, _stream_execution_events
+    from starlette.requests import ClientDisconnect
+
+    async def run() -> None:
+        closed = False
+        ready = asyncio.Event()
+        store = FakeMessageStore()
+
+        class WaitingRuntime(FakeSuccessRuntime):
+            async def stream(self, request: RuntimeRequest) -> AsyncIterator[RuntimeStreamEvent]:
+                nonlocal closed
+                try:
+                    yield RuntimeStreamEvent(kind=RuntimeStreamEventKind.DELTA, content="partial")
+                    ready.set()
+                    await asyncio.Event().wait()
+                finally:
+                    # Runtime implementations shield their resource teardown.
+                    with CancelScope(shield=True):
+                        await asyncio.sleep(0)
+                        closed = True
+
+        request = RuntimeRequest(
+            user_id=UUID(USER_ID), conversation_id=UUID(CONVERSATION_ID), content="Hello",
+        )
+        body = _stream_execution_events(
+            UUID(CONVERSATION_ID), request, USER_ID, store, WaitingRuntime(),
+            Message.model_validate(CREATED_ROW),
+        )
+        response = ExecutionStreamingResponse(body)
+
+        async def send(message: ASGIMessage) -> None:
+            if message["type"] == "http.response.body" and b"event: delta" in message["body"]:
+                if not during_read:
+                    ready.set()
+                    if spec_version == "2.4":
+                        raise OSError("client disconnected")
+                    await asyncio.Event().wait()
+
+        async def receive() -> ASGIMessage:
+            await ready.wait()
+            return {"type": "http.disconnect"}
+
+        task = asyncio.create_task(response(
+            {"type": "http", "asgi": {"spec_version": spec_version}}, receive, send,
+        ))
+        if spec_version == "2.4" and during_read:
+            await ready.wait()
+            task.cancel()
+        try:
+            await asyncio.wait_for(task, 2)
+        except (ClientDisconnect, asyncio.CancelledError):
+            assert spec_version == "2.4"
+        assert closed
+        assert body.ag_frame is None
+        assert store.assistant_writes == []
+
+    asyncio.run(run())

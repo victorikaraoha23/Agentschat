@@ -68,6 +68,14 @@ export function beginMessageSubmit(state: ConversationThreadState): Conversation
   };
 }
 
+/** Record the confirmed user message while the assistant is still running. */
+export function streamStarted(
+  state: ConversationThreadState,
+  message: Message,
+): ConversationThreadState {
+  return { ...state, messages: [...state.messages, message] };
+}
+
 /** Append streamed text to the reply being shown. */
 export function streamDelta(
   state: ConversationThreadState,

@@ -320,18 +320,25 @@ body model, the same verified identity, and the same owner-scoped user-message w
 ownership check. Those steps run first, so an unauthenticated caller, a foreign conversation, and
 invalid content are still ordinary HTTP errors rather than a stream that fails after it opens.
 
-The protocol is three events, matching the runtime contract's three event kinds:
+The protocol starts with the persisted user row, then carries deltas and one terminal event:
 
 ```
+event: start
+data: {"message":{"id":"...","conversation_id":"...","user_id":"...","role":"user","content":"Hi","created_at":"..."}}
+
 event: delta
 data: {"content":"Hello"}
 
 event: complete
-data: {"message_id":"..."}
+data: {"message_id":"...","content":"Hello","message":{"id":"...","conversation_id":"...","user_id":"...","role":"assistant","content":"Hello","created_at":"..."}}
 
 event: error
 data: {"code":"failed","message":"The agent run failed."}
 ```
+
+The `complete` content and message metadata come from the stored assistant row. Runtime cleanup
+and persistence finish before completion is emitted. A runtime exception or missing terminal event
+produces a fixed `error`; disconnects close the response body and runtime stream.
 
 Payloads are JSON, so a reply containing newlines cannot break the framing. The `code` values are the
 runtime contract's `RuntimeFailureReason`, plus `assistant-persist-failed` and `not-found` for the two

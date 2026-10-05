@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ChatComposer } from "./chat-composer";
 import styles from "./conversation.module.css";
@@ -16,6 +16,7 @@ import {
   streamCompleted,
   streamDelta,
   streamFailed,
+  streamStarted,
   type ConversationThreadState,
 } from "@/lib/conversation-thread";
 import type {
@@ -59,8 +60,8 @@ export interface ConversationPageProps {
  * failure.
  *
  * A message is shown only after the API confirms it was stored, so the
- * conversation never contains something that does not exist. This task stops at
- * persistence: no agent runs, no reply is produced, and nothing is streamed.
+ * conversation never contains something that does not exist. Execution streams
+ * provisional deltas, then confirms the persisted assistant row.
  */
 export function ConversationPage({ conversationId }: ConversationPageProps) {
   const [session, setSession] = useState<SessionState | null>(null);
@@ -74,6 +75,16 @@ export function ConversationPage({ conversationId }: ConversationPageProps) {
   } | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [thread, setThread] = useState<ConversationThreadState>(initialThreadState);
+
+  const activeSubmission = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      activeSubmission.current?.abort();
+      activeSubmission.current = null;
+      setThread(initialThreadState());
+    };
+  }, [conversationId]);
 
   useEffect(() => {
     let userId: string | null = null;
@@ -113,38 +124,41 @@ export function ConversationPage({ conversationId }: ConversationPageProps) {
 
   const sendMessage = useCallback(
     async (content: string): Promise<ChatSubmitOutcome> => {
-      // The thread rules refuse a second submit while one is in flight, so a
-      // double click or an impatient Enter cannot send the same text twice.
+      if (activeSubmission.current !== null) {
+        return { ok: false, message: "A reply is already in progress." };
+      }
+      const controller = new AbortController();
+      activeSubmission.current = controller;
       setThread(beginMessageSubmit);
 
       const outcome = await streamExecution({
         conversationId,
         content,
+        signal: controller.signal,
         onEvent: (event) => {
-          if (event.kind === "delta") {
-            setThread((state) => streamDelta(state, event.content));
+          if (controller.signal.aborted) return;
+          if (event.kind === "start") {
+            setThread((state) => controller.signal.aborted
+              ? state : streamStarted(state, event.message));
+          } else if (event.kind === "delta") {
+            setThread((state) => controller.signal.aborted
+              ? state : streamDelta(state, event.content));
           }
         },
       });
 
+      if (controller.signal.aborted) {
+        return { ok: false, message: "" };
+      }
+      activeSubmission.current = null;
       if (!outcome.ok) {
-        setThread((state) => streamFailed(state, outcome.message));
+        setThread((state) => controller.signal.aborted
+          ? state : streamFailed(state, outcome.message));
         return { ok: false, message: outcome.message };
       }
 
-      // The reply now exists server-side. The page shows the row the API
-      // persisted rather than the accumulated text, so what is on screen is what
-      // a reload will show too.
-      setThread((state) =>
-        streamCompleted(state, {
-          id: outcome.messageId,
-          conversationId,
-          userId: "",
-          role: "assistant",
-          content: outcome.content,
-          createdAt: new Date().toISOString(),
-        }),
-      );
+      setThread((state) => controller.signal.aborted
+        ? state : streamCompleted(state, outcome.message));
       return { ok: true, message: "" };
     },
     [conversationId],

@@ -16,6 +16,7 @@ import {
   streamCompleted,
   streamDelta,
   streamFailed,
+  streamStarted,
 } from "./conversation-thread.ts";
 import type { Message } from "./messages-api.ts";
 
@@ -129,4 +130,14 @@ test("messages stay in the order they were confirmed", () => {
     state.messages.map((entry) => entry.content),
     ["Hello there", "Second"],
   );
+});
+
+
+test("the confirmed user message precedes the reply and survives a failed run", () => {
+  const user = message({ id: "user-row", role: "user", content: "Question" });
+  const started = streamStarted(beginMessageSubmit(initialThreadState()), user);
+  assert.deepEqual(started.messages, [user]);
+  assert.equal(started.submitting, true);
+  assert.deepEqual(streamFailed(streamDelta(started, "partial"), "Failed").messages, [user]);
+  assert.deepEqual(streamCompleted(started, message()).messages, [user, message()]);
 });

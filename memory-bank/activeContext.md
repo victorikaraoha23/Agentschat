@@ -1,8 +1,8 @@
 # Active Context
 
-- **Date:** 2026-10-05 (Task 8.2 session: Assistant Response Persistence). Branch `update`.
-- **Current task:** Task 8.2 (Assistant Response Persistence) is **complete**. The next task, 8.3
-  (streaming), must not begin without an explicit instruction.
+- **Date:** 2026-10-05 (Task 8.3: streaming execution and review fixes).
+- **Current task:** Task 8.3 (streaming and frontend execution) is **implemented**. The conversation
+  page calls `POST .../execute/stream`, displays streamed output and confirms the persisted reply.
 - **What was done:**
   - **Task 0.1 (2026-09-22):** rewrote root `AGENTS.md` as the AgentsChat engineering constitution
     (mission, separation of concerns, dependency direction, simplicity, atomic dev, type safety, API,
@@ -233,12 +233,11 @@
     Hermes README), and should `apps/desktop/README.md`'s `../../README.md` link follow it?
 - **Next steps:**
   - Start the next task only on explicit instruction; read the root `AGENTS.md`, `apps/api/README.md`, and
-    `apps/web/README.md` first. Task 8.3 (streaming) is the next planned task and has **not** been
-    started.
-  - The full user -> agent -> reply loop now exists end to end on the API side, but the frontend still
-    posts to `POST .../messages` only: nothing in `apps/web` calls `.../execute`, no assistant message
-    is rendered, and no message-retrieval endpoint exists. Frontend execution and history belong to
-    later tasks.
+    `apps/web/README.md` first. Task 8.3 streaming and frontend execution are implemented.
+  - The user -> agent -> reply loop now includes the frontend: `POST .../execute/stream` confirms
+    the user row, streams provisional deltas, then confirms the persisted assistant row. Navigation
+    aborts active submissions and releases runtime resources. Message-history retrieval remains
+    a later task; the page shows messages from the current visit.
   - Conversation continuity is still absent: the Hermes adapter uses a disposable workspace per run
     (Task 7.2), so `conversation_id` is passed in the contract but no agent session survives between
     turns. Resuming per conversation needs a durable per-run workspace and is its own task.

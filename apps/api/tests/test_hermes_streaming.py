@@ -380,3 +380,65 @@ def test_the_user_text_never_reaches_the_command_line(
     asyncio.run(_run_hostile())
 
     assert hostile not in " ".join(recorded["argv"])
+
+
+def test_closing_public_stream_stops_child_before_returning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = _fake_hermes(
+        monkeypatch, stdout=_line({"type": "text", "text": "partial"}),
+        never_finishes=True,
+    )
+
+    async def run() -> None:
+        events = _adapter().stream(_request())
+        assert (await anext(events)).kind is RuntimeStreamEventKind.DELTA
+        await events.aclose()
+        assert created[0].terminated or created[0].killed
+        assert created[0].returncode is not None
+
+    asyncio.run(run())
+
+
+def test_cancellation_during_runtime_read_finishes_process_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import anyio
+
+    async def run() -> None:
+        reading = asyncio.Event()
+        stopped = False
+
+        class SlowStoppingProcess(_FakeStreamProcess):
+            async def wait(self) -> int:
+                nonlocal stopped
+                if not self.terminated:
+                    reading.set()
+                    await asyncio.Event().wait()
+                await asyncio.sleep(0)
+                stopped = True
+                self.returncode = -15
+                return -15
+
+            def terminate(self) -> None:
+                self.terminated = True
+
+        process = SlowStoppingProcess(never_finishes=True)
+
+        async def spawn(*args: str, **kwargs: object) -> SlowStoppingProcess:
+            return process
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+
+        async def consume() -> None:
+            async for _ in _adapter().stream(_request()):
+                pass
+
+        async with anyio.create_task_group() as group:
+            group.start_soon(consume)
+            await reading.wait()
+            group.cancel_scope.cancel()
+        assert stopped
+        assert process.returncode == -15
+
+    asyncio.run(run())

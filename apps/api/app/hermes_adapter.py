@@ -35,10 +35,12 @@ import asyncio
 import json
 import os
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import aclosing
 from pathlib import Path
 from typing import Final, Literal
 
+from anyio import CancelScope
 from pydantic import BaseModel, ConfigDict
 
 from app.logging_config import logger
@@ -356,7 +358,7 @@ class HermesRuntimeAdapter:
 
     async def stream(
         self, request: RuntimeRequest
-    ) -> AsyncIterator[RuntimeStreamEvent]:
+    ) -> AsyncGenerator[RuntimeStreamEvent, None]:
         """Run one request, yielding the reply as Hermes produces it.
 
         The difference from :meth:`execute` is *when* the answer is read, not what
@@ -366,12 +368,13 @@ class HermesRuntimeAdapter:
         instead of after the run ends.
         """
         with tempfile.TemporaryDirectory(prefix="agentschat-run-") as workspace:
-            async for event in self._stream_in(Path(workspace), request):
-                yield event
+            async with aclosing(self._stream_in(Path(workspace), request)) as events:
+                async for event in events:
+                    yield event
 
     async def _stream_in(
         self, workspace: Path, request: RuntimeRequest
-    ) -> AsyncIterator[RuntimeStreamEvent]:
+    ) -> AsyncGenerator[RuntimeStreamEvent, None]:
         """Read one run's stdout incrementally and finish with one terminal event.
 
         Exactly one ``COMPLETED`` or ``FAILED`` event is always yielded last, so a
@@ -422,10 +425,13 @@ class HermesRuntimeAdapter:
             # Also reached when the caller closes the stream early, which is what a
             # browser disconnect looks like: the child is terminated rather than
             # left running with nobody reading it (root AGENTS.md §11, §12).
-            if not stderr_task.done():
-                stderr_task.cancel()
-            if process.returncode is None:
-                process.terminate()
+            # Cancellation may arrive during a pending read, before the caller
+            # can close this generator. Shield teardown at the resource boundary.
+            with CancelScope(shield=True):
+                if not stderr_task.done():
+                    stderr_task.cancel()
+                await _stop_process(process)
+                await asyncio.gather(stderr_task, return_exceptions=True)
 
         # The full stdout was kept alongside the deltas so the existing outcome
         # logic decides success and failure in exactly one place.

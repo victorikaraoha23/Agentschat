@@ -1,17 +1,19 @@
 """AgentsChat FastAPI application: health, identity, conversations, messages, and execution."""
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated
 from uuid import UUID
 
+from anyio import CancelScope
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from httpx import HTTPError
 from pydantic import BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
+from starlette.types import Send
 from supabase import PostgrestAPIError, SupabaseException
 
 from app.auth import AuthenticatedUser, require_authenticated_user
@@ -553,7 +555,8 @@ async def execute_user_message(
     #    failure here is not swallowed: reporting success would leave the user's
     #    message with no reply and no signal that anything went wrong.
     try:
-        assistant_message = store.create_assistant_for_user(
+        assistant_message = await run_in_threadpool(
+            store.create_assistant_for_user,
             user.user_id, str(conversation_id), result.output
         )
     except (
@@ -598,8 +601,8 @@ async def execute_user_message(
 # service, no second protocol (root AGENTS.md §4).
 _STREAM_MEDIA_TYPE = "text/event-stream"
 
-#: Event names. Three, matching the runtime contract's three event kinds, so the
-#: protocol carries no vocabulary a Hermes record could leak into.
+#: Application events include the confirmed user message before runtime output.
+STREAM_EVENT_START = "start"
 STREAM_EVENT_DELTA = "delta"
 STREAM_EVENT_COMPLETE = "complete"
 STREAM_EVENT_ERROR = "error"
@@ -616,13 +619,28 @@ def _sse(event: str, data: dict[str, object]) -> str:
 
 
 
+class ExecutionStreamingResponse(StreamingResponse):
+    """Close the body even when sending a chunk fails or the client disconnects."""
+
+    body_iterator: AsyncGenerator[str, None]
+
+    async def stream_response(self, send: Send) -> None:
+        try:
+            await super().stream_response(send)
+        finally:
+            # Starlette cancels streaming on disconnect; cleanup must still finish.
+            with CancelScope(shield=True):
+                await self.body_iterator.aclose()
+
+
 async def _stream_execution_events(
     conversation_id: UUID,
     request: RuntimeRequest,
     user_id: str,
     store: SupabaseMessageStore,
     runtime: AgentRuntime,
-) -> AsyncIterator[str]:
+    user_message: Message,
+) -> AsyncGenerator[str, None]:
     """Forward one run's events as SSE, persisting the reply only if it completed.
 
     Deltas are forwarded as they arrive, but nothing is written until the runtime
@@ -634,62 +652,82 @@ async def _stream_execution_events(
     fails, that is a terminal error rather than a success, because the run's
     output exists but is not in the conversation.
     """
-    async for event in runtime.stream(request):
-        if event.kind is RuntimeStreamEventKind.DELTA:
-            yield _sse(STREAM_EVENT_DELTA, {"content": event.content})
-            continue
-
-        if event.kind is RuntimeStreamEventKind.FAILED:
-            reason = event.reason or RuntimeFailureReason.FAILED
-            logger.warning(
-                "Streamed agent execution failed (conversation_id=%s, reason=%s).",
-                conversation_id,
-                reason.value,
-            )
-            _status, detail = _RUNTIME_FAILURE_RESPONSES[reason]
-            yield _sse(STREAM_EVENT_ERROR, {"code": reason.value, "message": detail})
-            return
-
-        # COMPLETED: the run produced a whole reply, so it may be stored.
+    yield _sse(STREAM_EVENT_START, {"message": user_message.model_dump(mode="json")})
+    terminal: RuntimeStreamEvent | None = None
+    try:
+        events = runtime.stream(request)
         try:
-            assistant_message = await run_in_threadpool(
-                store.create_assistant_for_user,
-                user_id,
-                str(conversation_id),
-                event.content,
-            )
-        except (
-            MessageCreateError,
-            PostgrestAPIError,
-            SupabaseException,
-            SupabaseNotConfiguredError,
-            HTTPError,
-        ) as exc:
-            logger.exception(
-                "Streamed assistant message could not be persisted "
-                "(conversation_id=%s): %s",
-                conversation_id,
-                exc,
-            )
-            yield _sse(
-                STREAM_EVENT_ERROR,
-                {
-                    "code": "assistant-persist-failed",
-                    "message": ASSISTANT_PERSIST_FAILED_DETAIL,
-                },
-            )
-            return
+            async for event in events:
+                if event.kind is RuntimeStreamEventKind.DELTA:
+                    yield _sse(STREAM_EVENT_DELTA, {"content": event.content})
+                else:
+                    terminal = event
+                    break
+        finally:
+            with CancelScope(shield=True):
+                await events.aclose()
+    except Exception:
+        logger.exception(
+            "Streamed agent execution raised (conversation_id=%s).", conversation_id
+        )
+        terminal = None
 
-        if assistant_message is None:
-            yield _sse(
-                STREAM_EVENT_ERROR,
-                {"code": "not-found", "message": CONVERSATION_NOT_FOUND_DETAIL},
-            )
-            return
-
-        yield _sse(STREAM_EVENT_COMPLETE, {"message_id": str(assistant_message.id)})
+    # Cleanup precedes persistence and the terminal event, including early EOF.
+    if terminal is None or terminal.kind is RuntimeStreamEventKind.FAILED:
+        reason = (terminal.reason if terminal else None) or RuntimeFailureReason.FAILED
+        logger.warning(
+            "Streamed agent execution failed (conversation_id=%s, reason=%s).",
+            conversation_id,
+            reason.value,
+        )
+        _status, detail = _RUNTIME_FAILURE_RESPONSES[reason]
+        yield _sse(STREAM_EVENT_ERROR, {"code": reason.value, "message": detail})
         return
 
+    event = terminal
+    # COMPLETED: the run produced a whole reply, so it may be stored.
+    try:
+        assistant_message = await run_in_threadpool(
+            store.create_assistant_for_user,
+            user_id,
+            str(conversation_id),
+            event.content,
+        )
+    except (
+        MessageCreateError,
+        PostgrestAPIError,
+        SupabaseException,
+        SupabaseNotConfiguredError,
+        HTTPError,
+    ) as exc:
+        logger.exception(
+            "Streamed assistant message could not be persisted "
+            "(conversation_id=%s): %s",
+            conversation_id,
+            exc,
+        )
+        yield _sse(
+            STREAM_EVENT_ERROR,
+            {
+                "code": "assistant-persist-failed",
+                "message": ASSISTANT_PERSIST_FAILED_DETAIL,
+            },
+        )
+        return
+
+    if assistant_message is None:
+        yield _sse(
+            STREAM_EVENT_ERROR,
+            {"code": "not-found", "message": CONVERSATION_NOT_FOUND_DETAIL},
+        )
+        return
+
+    yield _sse(STREAM_EVENT_COMPLETE, {
+        "message_id": str(assistant_message.id),
+        "content": assistant_message.content,
+        "message": assistant_message.model_dump(mode="json"),
+    })
+    return
 
 
 
@@ -716,7 +754,7 @@ async def stream_execution(
     produce ordinary HTTP errors rather than a stream that fails after it opens.
 
     Once streaming begins the outcome travels as events, because a 200 has already
-    been sent. The event names are the contract's own three kinds; Hermes event
+    been sent. The events carry persisted messages and runtime outcomes; Hermes event
     records, exit codes, and error text never reach the browser.
     """
     try:
@@ -751,9 +789,9 @@ async def stream_execution(
         content=message.content,
     )
 
-    return StreamingResponse(
+    return ExecutionStreamingResponse(
         _stream_execution_events(
-            conversation_id, runtime_request, user.user_id, store, runtime
+            conversation_id, runtime_request, user.user_id, store, runtime, message
         ),
         media_type=_STREAM_MEDIA_TYPE,
         headers={

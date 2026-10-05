@@ -19,6 +19,17 @@ import {
 
 const CONVERSATION_ID = "223e4567-e89b-12d3-a456-426614174000";
 const TOKEN = "header.payload.signature";
+const STORED_ROW = {
+  id: "row-1", conversation_id: CONVERSATION_ID, user_id: "user-1",
+  role: "assistant", content: "stored reply", created_at: "2026-10-05T01:02:03Z",
+};
+const STORED_MESSAGE = {
+  id: STORED_ROW.id, conversationId: CONVERSATION_ID, userId: STORED_ROW.user_id,
+  role: STORED_ROW.role, content: STORED_ROW.content, createdAt: STORED_ROW.created_at,
+};
+function completion(id = "row-1"): Record<string, unknown> {
+  return { message_id: id, content: STORED_ROW.content, message: { ...STORED_ROW, id } };
+}
 
 function frame(event: string, data: Record<string, unknown>): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -53,8 +64,8 @@ test("a delta frame becomes a typed delta event", () => {
 
 test("a complete frame carries the message id", () => {
   const parser = new ExecutionEventParser();
-  assert.deepEqual(parser.push(frame("complete", { message_id: "abc" })), [
-    { kind: "complete", messageId: "abc" },
+  assert.deepEqual(parser.push(frame("complete", completion("abc"))), [
+    { kind: "complete", messageId: "abc", message: { ...STORED_MESSAGE, id: "abc" } },
   ]);
 });
 
@@ -120,6 +131,7 @@ test("a keep-alive comment does not produce an event", () => {
 test("a delta with no content is ignored", () => {
   const parser = new ExecutionEventParser();
   assert.deepEqual(parser.push(frame("delta", {})), []);
+});
 
 // --- Consuming a stream ------------------------------------------------------
 
@@ -139,15 +151,16 @@ async function run(
   return { result, events };
 }
 
-test("deltas are reported in order and the content is accumulated", async () => {
+test("deltas are reported in order and completion returns the persisted row", async () => {
   const { result, events } = await run([
     frame("delta", { content: "fake " }) + frame("delta", { content: "assistant reply" }),
-    frame("complete", { message_id: "row-1" }),
+    frame("complete", completion()),
   ]);
 
   assert.equal(result.ok, true);
   assert.equal(result.ok && result.messageId, "row-1");
-  assert.equal(result.ok && result.content, "fake assistant reply");
+  assert.equal(result.ok && result.content, "stored reply");
+  assert.deepEqual(result.ok && result.message, STORED_MESSAGE);
   assert.deepEqual(
     events.map((event) => event.kind),
     ["delta", "delta", "complete"],
@@ -165,7 +178,7 @@ test("the request carries the session token and only the content", async () => {
     fetchImpl: async (url, init) => {
       seenUrl = url;
       seenInit = init;
-      return streamResponse([frame("complete", { message_id: "row-1" })]);
+      return streamResponse([frame("complete", completion())]);
     },
   });
 
@@ -262,12 +275,11 @@ test("a pre-stream 422 is reported as invalid input", async () => {
 
 test("a malformed event does not stop the ones after it", async () => {
   const { result } = await run([
-    "event: delta\ndata: {broken\n\n" + frame("complete", { message_id: "row-9" }),
+    "event: delta\ndata: {broken\n\n" + frame("complete", completion("row-9")),
   ]);
 
   assert.equal(result.ok, true);
   assert.equal(result.ok && result.messageId, "row-9");
-});
 });
 
 test("flush reads a trailing frame the server never terminated", () => {
@@ -280,4 +292,53 @@ test("flush with nothing left returns nothing", () => {
   const parser = new ExecutionEventParser();
   parser.push(frame("delta", { content: "x" }));
   assert.deepEqual(parser.flush(), []);
+});
+
+test("start confirms the stored user row even if execution then fails", async () => {
+  const row = { ...STORED_ROW, id: "user-row", role: "user", content: "Hello" };
+  const { result, events } = await run([
+    frame("start", { message: row }),
+    frame("error", { code: "failed", message: "Run failed" }),
+  ]);
+  assert.equal(result.ok, false);
+  assert.deepEqual(events[0], {
+    kind: "start", message: { ...STORED_MESSAGE, id: row.id, role: "user", content: "Hello" },
+  });
+});
+
+test("completion without persisted metadata or with inconsistent content is rejected", () => {
+  const parser = new ExecutionEventParser();
+  assert.deepEqual(parser.push(frame("complete", { message_id: "row-1" })), []);
+  assert.deepEqual(parser.push(frame("complete", { ...completion(), content: "wrong" })), []);
+  assert.deepEqual(parser.push(frame("complete", {
+    ...completion(), message: { ...STORED_ROW, created_at: null },
+  })), []);
+});
+
+test("aborting passes the signal to fetch and suppresses late events", async () => {
+  const controller = new AbortController();
+  const events: ExecutionStreamEvent[] = [];
+  let delivered = false;
+  const result = await streamExecution({
+    conversationId: CONVERSATION_ID, content: "Hello", accessToken: TOKEN,
+    signal: controller.signal, onEvent: (event) => events.push(event),
+    fetchImpl: async (_url, init) => {
+      assert.equal(init?.signal, controller.signal);
+      return new Response(new ReadableStream({
+        pull(stream) {
+          if (!delivered) {
+            delivered = true;
+            controller.abort();
+            stream.enqueue(new TextEncoder().encode(
+              frame("delta", { content: "late" }) + frame("complete", completion()),
+            ));
+          } else {
+            stream.close();
+          }
+        },
+      }));
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(events, []);
 });

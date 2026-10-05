@@ -6,7 +6,7 @@
  * arrives in arbitrary pieces, and turning one stream into typed events the page
  * can act on.
  *
- * The parser is deliberately specific and small. It knows this API's three event
+ * The parser is deliberately specific and small. It knows this API's application event
  * names and nothing else, and it never guesses: an event it cannot read is
  * skipped rather than turned into content, because showing a half-read payload
  * would put something in the conversation that the server never said (root
@@ -20,15 +20,18 @@
 
 import { getAccessToken } from "./auth.ts";
 import { API_BASE_URL } from "./api-base-url.ts";
+import { isMessagePayload, toMessage, type Message } from "./messages-api.ts";
 
 /** The event names the API sends. Nothing else is meaningful to this page. */
 export type ExecutionStreamEvent =
+  | { kind: "start"; message: Message }
   | { kind: "delta"; content: string }
-  | { kind: "complete"; messageId: string }
+  | { kind: "complete"; messageId: string; message: Message }
   | { kind: "error"; code: string; message: string };
 
 /** Why a stream ended without a `complete` event. */
 export type ExecutionStreamFailure =
+  | "aborted"
   | "unauthenticated"
   | "forbidden"
   | "not-found"
@@ -39,7 +42,7 @@ export type ExecutionStreamFailure =
   | "unexpected";
 
 export type ExecutionStreamResult =
-  | { ok: true; messageId: string; content: string }
+  | { ok: true; messageId: string; content: string; message: Message }
   | { ok: false; reason: ExecutionStreamFailure; message: string };
 
 const SEPARATOR = "\n\n";
@@ -127,9 +130,15 @@ function parseFrame(frame: string): ExecutionStreamEvent | null {
       ? { kind: "delta", content: data.content }
       : null;
   }
+  if (name === "start") {
+    return isMessagePayload(data.message) && data.message.role === "user"
+      ? { kind: "start", message: toMessage(data.message) }
+      : null;
+  }
   if (name === "complete") {
-    return typeof data.message_id === "string"
-      ? { kind: "complete", messageId: data.message_id }
+    return isMessagePayload(data.message) && data.message.role === "assistant" &&
+      data.message_id === data.message.id && data.content === data.message.content
+      ? { kind: "complete", messageId: data.message_id, message: toMessage(data.message) }
       : null;
   }
   if (name === "error") {
@@ -164,6 +173,7 @@ export interface StreamExecutionOptions {
   onEvent: (event: ExecutionStreamEvent) => void;
   accessToken?: string | null;
   fetchImpl?: FetchLike;
+  signal?: AbortSignal;
 }
 
 /**
@@ -196,6 +206,7 @@ export async function streamExecution(
         Accept: "text/event-stream",
       },
       body: JSON.stringify({ content: options.content }),
+      signal: options.signal,
     });
   } catch {
     return { ok: false, reason: "network", message: REQUEST_FAILED_MESSAGE };
@@ -218,18 +229,18 @@ export async function streamExecution(
   }
 
   const parser = new ExecutionEventParser();
-  let accumulated = "";
-  let completed: string | null = null;
+  let completed: Message | null = null;
   let failure: string | null = null;
 
   const dispatch = (events: ExecutionStreamEvent[]): void => {
     for (const event of events) {
+      if (options.signal?.aborted || completed !== null || failure !== null) {
+        return;
+      }
       options.onEvent(event);
-      if (event.kind === "delta") {
-        accumulated += event.content;
-      } else if (event.kind === "complete") {
-        completed = event.messageId;
-      } else {
+      if (event.kind === "complete") {
+        completed = event.message;
+      } else if (event.kind === "error") {
         failure = event.message;
       }
     }
@@ -254,8 +265,12 @@ export async function streamExecution(
     reader.releaseLock();
   }
 
+  if (options.signal?.aborted) {
+    return { ok: false, reason: "aborted", message: "" };
+  }
   if (completed !== null) {
-    return { ok: true, messageId: completed, content: accumulated };
+    const message: Message = completed;
+    return { ok: true, messageId: message.id, content: message.content, message };
   }
   if (failure !== null) {
     return { ok: false, reason: "http", message: failure };

@@ -371,6 +371,12 @@ def test_persistence_runs_outside_the_event_loop(
             persistence_threads.append(get_ident())
             return super().create_for_user(user_id, conversation_id, content)
 
+        def create_assistant_for_user(
+            self, user_id: str, conversation_id: str, content: str
+        ) -> Message | None:
+            persistence_threads.append(get_ident())
+            return super().create_assistant_for_user(user_id, conversation_id, content)
+
     class ThreadRecordingRuntime(FakeSuccessRuntime):
         async def execute(self, request: RuntimeRequest) -> RuntimeResult:
             runtime_threads.append(get_ident())
@@ -385,8 +391,9 @@ def test_persistence_runs_outside_the_event_loop(
 
     assert response.status_code == 200
     assert store.writes == [(USER_ID, CONVERSATION_ID, "Hello")]
-    assert len(persistence_threads) == len(runtime_threads) == 1
-    assert persistence_threads[0] != runtime_threads[0]
+    assert len(persistence_threads) == 2
+    assert len(runtime_threads) == 1
+    assert all(thread != runtime_threads[0] for thread in persistence_threads)
 
 
 def test_message_is_persisted_before_the_runtime_runs(

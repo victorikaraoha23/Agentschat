@@ -162,7 +162,10 @@ The page keeps the reply in local state through the pure transitions in `lib/con
 `streamingContent` is deliberately **not** part of `messages` while it streams. A reply that fails
 half way has produced text the server never stored, so `streamFailed` discards it rather than leaving
 an unfinished answer in the thread. On completion the page appends the message the API persisted, so
-what is on screen is what a reload would show.
+its content, user ID and timestamp match the stored row. The initial `start` event adds the persisted
+user message before any reply arrives. Navigation aborts the active request and clears the thread;
+late events from that request cannot update the new conversation. Message-history retrieval is still
+pending, so a reload starts with an empty thread.
 
 Layout is one column, in the route's scoped stylesheet (`conversation.module.css`): header at the top, a
 growing message area, composer at the bottom, all reading the existing tokens from `app/globals.css`.

@@ -19,7 +19,7 @@ of anything other than the reply text do not exist in the product yet.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from enum import Enum
 from typing import Annotated, Final, Protocol
 from uuid import UUID
@@ -141,14 +141,16 @@ class AgentRuntime(Protocol):
         """Run one agent request and return its application-level outcome."""
         ...  # pragma: no cover - contract only
 
-    def stream(self, request: RuntimeRequest) -> AsyncIterator[RuntimeStreamEvent]:
+    def stream(self, request: RuntimeRequest) -> AsyncGenerator[RuntimeStreamEvent, None]:
         """Run one agent request, yielding events as they become available.
 
         The async generator form matters: a run may involve model calls,
         subprocesses, and network work, so the adapter must be able to yield
         between them without blocking the request. Implementations always finish
         with exactly one terminal event (``COMPLETED`` or ``FAILED``), which is
-        what tells the caller whether a complete reply exists.
+        what tells the caller whether a complete reply exists. Callers close the
+        generator to release runtime resources when streaming stops. Implementations
+        must shield asynchronous cleanup when a pending read is cancelled.
         """
         ...  # pragma: no cover - contract only
 
@@ -165,7 +167,7 @@ class _UnavailableRuntime:
 
     async def stream(
         self, request: RuntimeRequest
-    ) -> AsyncIterator[RuntimeStreamEvent]:
+    ) -> AsyncGenerator[RuntimeStreamEvent, None]:
         """Fail immediately rather than pretending to stream an answer.
 
         A stream that opened and never produced anything would leave the caller
