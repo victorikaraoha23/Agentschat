@@ -431,9 +431,26 @@ _RUNTIME_FAILURE_RESPONSES: dict[RuntimeFailureReason, tuple[int, str]] = {
 }
 
 
+#: Status of a completed execution. Failures never reach the body as a success:
+#: they are raised as HTTPExceptions carrying the fixed per-reason detail.
+EXECUTION_COMPLETED_STATUS = "completed"
+
+ASSISTANT_PERSIST_FAILED_DETAIL = "The agent reply could not be saved."
+
+
+class ExecutionResponse(BaseModel):
+    """Answer to a successful ``POST /conversations/{id}/execute``."""
+
+    status: str = Field(
+        description="Always \"completed\"; failures use HTTP error statuses."
+    )
+    content: str = Field(description="The assistant reply, as persisted.")
+    message_id: UUID = Field(description="Id of the persisted assistant message.")
+
+
 @app.post(
     "/conversations/{conversation_id}/execute",
-    response_model=RuntimeResult,
+    response_model=ExecutionResponse,
     status_code=status.HTTP_200_OK,
 )
 async def execute_user_message(
@@ -442,19 +459,24 @@ async def execute_user_message(
     user: Annotated[AuthenticatedUser, Depends(require_authenticated_user)],
     store: Annotated[SupabaseMessageStore, Depends(get_message_store)],
     runtime: AgentRuntimeDep,
-) -> RuntimeResult:
-    """Persist the caller's message, run it through the agent runtime, and answer with its result.
+) -> ExecutionResponse:
+    """Persist the caller's message, run it, then persist the runtime's reply.
 
-    The first real execution path (Task 8.1): verified identity → owner-scoped
-    persistence → contract request → ``AgentRuntime`` → typed result. The
-    handler talks only to the runtime interface; reaching Hermes is entirely
+    Verified identity -> owner-scoped user-message persistence -> contract
+    request -> ``AgentRuntime`` -> owner-scoped assistant-message persistence.
+    The handler talks only to the runtime interface; reaching Hermes is entirely
     the adapter's business behind it (root AGENTS.md §3, §11).
 
     Persistence deliberately comes first, so the user's request is part of the
     conversation even when the run subsequently fails: a failed run leaves the
-    user message in place, writes no assistant message (a later task owns that),
-    and is not retried. Exactly one run happens per HTTP request — full
-    idempotency for a client that submits twice is deferred.
+    user message in place, writes no assistant message, and is not retried.
+    Exactly one run happens per HTTP request -- full idempotency for a client
+    that submits twice is deferred.
+
+    The assistant message is written only after a successful run and is owned by
+    the caller's verified identity, never by anything the runtime reported. If
+    that write fails the caller gets an error rather than a completion that did
+    not happen.
 
     The body reuses :class:`CreateMessageRequest`, so execution enforces
     byte-for-byte the same validation as ``POST .../messages`` (missing, empty,
@@ -521,7 +543,46 @@ async def execute_user_message(
         status_code, detail = _RUNTIME_FAILURE_RESPONSES[reason]
         raise HTTPException(status_code=status_code, detail=detail)
 
-    return result
+    # 4. Persist the reply as a second message in the same conversation, owned
+    #    by the same verified identity (never by anything the runtime said). A
+    #    failure here is not swallowed: reporting success would leave the user's
+    #    message with no reply and no signal that anything went wrong.
+    try:
+        assistant_message = store.create_assistant_for_user(
+            user.user_id, str(conversation_id), result.output
+        )
+    except (
+        MessageCreateError,
+        PostgrestAPIError,
+        SupabaseException,
+        SupabaseNotConfiguredError,
+        HTTPError,
+    ) as exc:
+        logger.exception(
+            "Assistant message could not be persisted "
+            "(conversation_id=%s): %s",
+            conversation_id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=ASSISTANT_PERSIST_FAILED_DETAIL,
+        ) from exc
+
+    # The conversation was verified moments ago by the user-message write, so a
+    # missing row here means the conversation disappeared underneath us. The
+    # same 404 as before says nothing about who owns it.
+    if assistant_message is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=CONVERSATION_NOT_FOUND_DETAIL,
+        )
+
+    return ExecutionResponse(
+        status=EXECUTION_COMPLETED_STATUS,
+        content=assistant_message.content,
+        message_id=assistant_message.id,
+    )
 
 
 @app.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)

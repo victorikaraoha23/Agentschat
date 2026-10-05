@@ -5,7 +5,8 @@ check, the authentication boundary, the `GET /me` profile read, and the conversa
 `POST /conversations`, `GET /conversations`, `GET /conversations/{conversation_id}`,
 `PATCH /conversations/{conversation_id}`, and `DELETE /conversations/{conversation_id}` — all backed by
 Supabase — plus `POST /conversations/{conversation_id}/messages` for persisting user messages and
-`POST /conversations/{conversation_id}/execute` for submitting one to the agent runtime. An
+`POST /conversations/{conversation_id}/execute` for submitting one to the agent runtime, which persists
+both the user's message and the assistant's reply. An
 agent-runtime boundary (`app/runtime.py`: `RuntimeRequest`, `RuntimeResult`, `AgentRuntime`,
 `get_agent_runtime`) has a Hermes adapter (`app/hermes_adapter.py`) behind it, and execution is a
 single synchronous request/response run — no assistant message is persisted yet and nothing is
@@ -246,7 +247,7 @@ matches nothing and answers the identical `404`.
 Assistant message persistence, message-history retrieval, and streaming do not exist yet: see
 `## Execution` below for what does run.
 
-## Execution (Task 8.1)
+## Execution (Tasks 8.1 and 8.2)
 
 `POST /conversations/{conversation_id}/execute` is the first real execution path — the one place a
 user message travels `FastAPI → runtime interface → Hermes adapter → Hermes`. The body is
@@ -264,11 +265,14 @@ The handler performs exactly this sequence, in this order:
 3. build a `RuntimeRequest` from the persisted row — `user_id`, `conversation_id`, `content` only —
    with no HTTP request, Supabase client, credential, or Hermes object crossing the boundary;
 4. `await runtime.execute(request)` exactly once: no retry, no queue, no background worker;
-5. translate the `RuntimeResult` into the response.
+5. on success, persist the reply as an `assistant` message in the same conversation (Task 8.2), owned by
+   the caller's verified identity;
+6. answer with the completed execution and the persisted reply's id.
 
-Success answers `200` with the Task 7.1 `RuntimeResult` itself — `{"ok": true, "output": "...",
-"reason": null, "message": ""}` — so no parallel result shape is invented. Failures are HTTP errors
-whose `detail` is always the runtime contract's fixed wording, never `RuntimeResult.message`:
+Success answers `200` with `ExecutionResponse` — `{"status": "completed", "content": "...",
+"message_id": "..."}` — because the caller needs the identity of the row that was stored, not the raw
+runtime result. `content` is exactly what was persisted. Failures are HTTP errors whose `detail` is
+always fixed application wording, never `RuntimeResult.message`:
 
 | Runtime reason | Status | `detail` |
 | --- | --- | --- |
@@ -283,8 +287,9 @@ whose `detail` is always the runtime contract's fixed wording, never `RuntimeRes
 | Id that is not a UUID | `422` | FastAPI validation error |
 | Missing, empty, whitespace-only, or overlong content | `422` | FastAPI validation error |
 | Missing conversation, or one owned by someone else | `404` | `{"detail": "Conversation not found."}` |
-| Supabase unconfigured or unreachable while persisting | `503` | `{"detail": "The message could not be sent."}` |
+| Supabase unconfigured or unreachable while persisting the request | `503` | `{"detail": "The message could not be sent."}` |
 | Runtime failure (table above) | `502` / `503` / `504` / `400` | `{"detail": "<fixed wording>"}` |
+| The reply itself could not be stored | `503` | `{"detail": "The agent reply could not be saved."}` |
 
 **Failure semantics.** The user message is persisted *before* the run starts, so when the runtime
 fails the conversation still holds the user's request: nothing is deleted, no assistant message is
@@ -292,9 +297,27 @@ invented, and nothing is retried. Exactly one run happens per HTTP request; full
 idempotency for a client that submits the same request twice is deliberately **deferred** — there is
 no lock, queue, or deduplication store, and introducing one is not part of this task.
 
+A run that succeeded but whose reply cannot be stored answers `503`, not a success. Reporting
+completion would leave the user's message in the conversation with no reply and nothing indicating
+that anything went wrong; the run itself is not retried, so the client decides what to do next.
+
 Tests swap a fake runtime in through `get_agent_runtime`, so the normal suite never starts Hermes.
 `tests/test_execute_endpoint.py` covers authentication, ownership, validation, persistence order,
-each failure translation, and leak resistance.
+each failure translation, and leak resistance; `tests/test_assistant_persistence.py` covers what
+happens to the reply afterwards.
+
+## Assistant messages (Task 8.2)
+
+`public.messages.role` accepts `user` and `assistant` (migration `0004`). Assistant rows are written
+only by the server, through `SupabaseMessageStore.create_assistant_for_user`, which passes through the
+same owner-scoped conversation read as the user write — so an assistant row can only ever land in a
+conversation the authenticated caller owns. `system`, `tool`, `function`, and `agent` remain refused
+by the database check until a real code path exists to produce them.
+
+No client can request an assistant row: `CreateMessageRequest` has no `role` field, and the endpoints
+pass a module constant rather than anything from the request. The reply's content is stored exactly as
+the runtime produced it — no truncation, no appended metadata, no Hermes text — and the runtime never
+decides ownership, only text.
 
 ## Agent runtime boundary (Tasks 7.1–7.2)
 
@@ -367,6 +390,7 @@ apps/api/
 │   ├── test_cors.py
 │   ├── test_error_handling.py
 │   ├── test_execute_endpoint.py # execution endpoint: auth, ownership, persistence order, failures
+│   ├── test_assistant_persistence.py # assistant reply: persistence, ownership, failure semantics
 │   ├── test_health.py
 │   ├── test_hermes_adapter.py   # command shape, isolation, outcome translation, DI selection
 │   ├── test_logging.py

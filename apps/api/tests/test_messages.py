@@ -181,3 +181,65 @@ def test_message_model_rejects_malformed_rows() -> None:
     del without_content["content"]
     with pytest.raises(ValidationError):
         Message.model_validate(without_content)
+# --- Role vocabulary (Task 8.2) ---------------------------------------------
+
+ASSISTANT_MIGRATION = (
+    Path(__file__).resolve().parent.parent.parent.parent
+    / "supabase"
+    / "migrations"
+    / "0004_allow_assistant_message_role.sql"
+)
+
+
+@pytest.fixture(scope="module")
+def assistant_sql() -> str:
+    """Read the role-widening migration once for the assertions below."""
+    return ASSISTANT_MIGRATION.read_text(encoding="utf-8")
+
+
+def test_assistant_migration_file_exists() -> None:
+    """The widening is a versioned, reviewable migration, not a manual edit."""
+    assert ASSISTANT_MIGRATION.is_file()
+
+
+def test_assistant_is_a_valid_message_role(assistant_sql: str) -> None:
+    """The check now accepts exactly `user` and `assistant`."""
+    assert (
+        "add constraint messages_role_user_or_assistant\n"
+        "    check (role in ('user', 'assistant'))" in assistant_sql
+    )
+
+
+def test_the_narrower_constraint_is_replaced(assistant_sql: str) -> None:
+    """The old user-only check is dropped, so the two cannot both apply."""
+    assert "drop constraint if exists messages_role_user_only" in assistant_sql
+
+
+def test_existing_user_messages_remain_valid(assistant_sql: str) -> None:
+    """`user` is still permitted, so rows written before this migration are valid."""
+    assert "'user'" in assistant_sql
+    assert "role = 'user'" not in assistant_sql
+
+
+@pytest.mark.parametrize("role", ["system", "tool", "function", "agent"])
+def test_no_other_role_is_granted(assistant_sql: str, role: str) -> None:
+    """Roles the product cannot produce stay refused."""
+    assert f"'{role}'" not in assistant_sql
+
+
+def test_the_widening_leaves_row_level_security_untouched(assistant_sql: str) -> None:
+    """No policy, grant, or column is changed: only the role vocabulary moves.
+
+    The messages policies are unchanged, so an assistant row is protected exactly
+    as a user row is: it is readable only by the owner of its conversation.
+    """
+    lowered = assistant_sql.lower()
+    assert "create policy" not in lowered
+    assert "alter table public.messages\n    enable row level security" not in lowered
+    assert "grant" not in lowered
+
+
+def test_the_role_check_still_needs_a_value(assistant_sql: str) -> None:
+    """The column stays `not null`; this migration widens values, not nullability."""
+    # The migration touches only the constraint, so the original not-null stands.
+    assert "drop not null" not in assistant_sql.lower()

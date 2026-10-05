@@ -1,9 +1,11 @@
-"""Message domain type and store (Task 6.2).
+"""Message domain type and store (Tasks 6.2 and 8.2).
 
-Schema foundation plus the one write the first messaging endpoint needs.
-:class:`Message` mirrors the ``public.messages`` row shape from
-``supabase/migrations/0003_create_messages.sql`` so code converts verified rows
-into this model instead of passing untyped dicts.
+Schema foundation plus the two writes the messaging endpoints need: a `user`
+message a person sent, and the `assistant` message the runtime's reply becomes
+after a successful execution. :class:`Message` mirrors the ``public.messages`` row
+shape from ``supabase/migrations/0003_create_messages.sql`` (with its role check
+widened by ``0004_allow_assistant_message_role.sql``) so code converts verified
+rows into this model instead of passing untyped dicts.
 
 Ownership is enforced in the store, in the same statement, exactly as the
 conversation store does (Tasks 5.2Ã¢â‚¬â€œ5.4): the conversation is read with the
@@ -38,10 +40,13 @@ MESSAGE_COLUMNS: tuple[str, ...] = (
     "created_at",
 )
 
-# The only role this task writes. Assistant, system, and tool roles arrive with
-# the agent tasks; the column's check constraint refuses anything else until the
-# migration that widens it exists.
+# The roles the API writes. `user` comes from a person; `assistant` is the
+# runtime's reply persisted after a successful execution (Task 8.2). The
+# database's `messages_role_user_or_assistant` check refuses anything else --
+# system, tool, function, and agent roles stay refused until a code path exists
+# that can legitimately produce them.
 MESSAGE_ROLE_USER = "user"
+MESSAGE_ROLE_ASSISTANT = "assistant"
 
 
 class Message(BaseModel):
@@ -142,7 +147,18 @@ class MessageStore(Protocol):
     def create_for_user(
         self, user_id: str, conversation_id: str, content: str
     ) -> Message | None:
-        """Append one message to a conversation ``user_id`` owns, or `None`."""
+        """Append one ``user`` message to a conversation ``user_id`` owns, or `None`."""
+
+    def create_assistant_for_user(
+        self, user_id: str, conversation_id: str, content: str
+    ) -> Message | None:
+        """Append one ``assistant`` message to a conversation ``user_id`` owns, or `None`.
+
+        Server-side only. No client can reach this path: the user-message request
+        model has no role field, so a caller cannot ask for an assistant row. The
+        execution flow calls it after a successful run and names the authenticated
+        user itself, rather than trusting any identity the runtime returned.
+        """
 
 
 class MessageCreateError(Exception):
@@ -173,7 +189,7 @@ class SupabaseMessageStore:
     def create_for_user(
         self, user_id: str, conversation_id: str, content: str
     ) -> Message | None:
-        """Append one message to a conversation owned by ``user_id``.
+        """Append one ``user`` message to a conversation owned by ``user_id``.
 
         Returns the persisted row, or `None` when the caller does not own the
         conversation Ã¢â‚¬â€ the same answer for a foreign conversation and for one
@@ -182,6 +198,39 @@ class SupabaseMessageStore:
         The conversation's `updated_at` is not written here: the migration's
         after-insert trigger refreshes it, so the timestamp stays correct no
         matter which path writes the message.
+        """
+        return self._insert_owned_message(
+            user_id, conversation_id, content, MESSAGE_ROLE_USER
+        )
+
+    def create_assistant_for_user(
+        self, user_id: str, conversation_id: str, content: str
+    ) -> Message | None:
+        """Append one ``assistant`` message to a conversation owned by ``user_id``.
+
+        The author's id is the caller's verified identity, passed in by the
+        execution flow. Nothing the agent runtime returned decides who owns this
+        row, so a runtime that echoed back a different id, or none at all, cannot
+        move the message to another user.
+
+        The content is stored exactly as produced: no truncation, no reformatting,
+        no appended metadata, and no Hermes text. The same after-insert trigger
+        refreshes the conversation's `updated_at`, so a completed exchange marks
+        the conversation as recently active without a second write.
+        """
+        return self._insert_owned_message(
+            user_id, conversation_id, content, MESSAGE_ROLE_ASSISTANT
+        )
+
+    def _insert_owned_message(
+        self, user_id: str, conversation_id: str, content: str, role: str
+    ) -> Message | None:
+        """Write one message of ``role`` after confirming the caller owns it.
+
+        Shared by both public writes so the ownership check and the insert remain
+        a single statement pair, with no second and looser path an assistant row
+        could take. ``role`` is a module constant chosen by the caller above,
+        never a value arriving in a request body.
         """
         client = self._client_factory(self._settings)
         owned = (
@@ -201,7 +250,7 @@ class SupabaseMessageStore:
                 {
                     "conversation_id": conversation_id,
                     "user_id": user_id,
-                    "role": MESSAGE_ROLE_USER,
+                    "role": role,
                     "content": content,
                 }
             )

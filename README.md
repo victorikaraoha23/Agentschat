@@ -9,7 +9,7 @@ execution dependency and which is not itself user-visible.
 
 ## Current status
 
-**Foundational development stage: the web application has signup/sign-in/sign-out, the API resolves authenticated users' AgentsChat profiles and lets a signed-in user create, list, read, rename, and delete conversations they own, and the conversation page at `/app/conversations/{conversation_id}` opens one such conversation — its title, an empty message area, and a composer that does not yet send anything. No message is persisted, and no agent execution exists.**
+**Development stage: the web application has signup/sign-in/sign-out, the API resolves authenticated users' AgentsChat profiles and lets a signed-in user create, list, read, rename, and delete conversations they own, and a signed-in user can send a message for agent execution through the runtime boundary — which persists the request, runs the agent through the Hermes adapter, and stores the reply. The conversation page at `/app/conversations/{conversation_id}` shows the conversation's messages and can send a message, but it does not yet call the execution endpoint, and no reply is streamed.**
 
 The repository contains the engineering constitution, the agent-runtime source that AgentsChat depends on,
 and the foundations of both applications (`apps/web`: signup, sign-in, sign-out, session detection over
@@ -20,8 +20,10 @@ Supabase Auth, a one-line profile confirmation, and the conversation page shell;
 `PATCH /conversations/{conversation_id}`, and `DELETE /conversations/{conversation_id}` — which create,
 read, rename, and delete conversations owned by the signed-in user). The schema exists as versioned Supabase migrations
 (`supabase/migrations/`: a `profiles` table and a `conversations` table, each with Row Level Security).
-There is **no** messaging, agent execution, or production deployment yet. Nothing described below as
-planned is implemented.
+Messaging and agent execution exist on the API side: a signed-in user can post a message, run it
+through the agent runtime, and see the request and the reply stored in the conversation. There is
+still **no** streaming, no message-history retrieval endpoint, no frontend assistant view, and no
+production deployment. Nothing described below as planned is implemented.
 
 ## Planned architecture
 
@@ -116,18 +118,19 @@ resolves the authenticated identity and their `profiles` row behind `GET /me`, a
 versioned migrations for both `profiles` and `conversations`. Conversation **creation, retrieval,
 renaming, and deletion** are in place (`POST /conversations`, `GET /conversations`,
 `GET /conversations/{conversation_id}`, `PATCH /conversations/{conversation_id}`, and
-`DELETE /conversations/{conversation_id}`, all scoped to the verified caller), and the conversation page
-renders one conversation from them: header, empty message area, composer. Persisting a message in a
-conversation is not — the composer sends nothing yet — and no agent execution exists.
+`DELETE /conversations/{conversation_id}`, all scoped to the verified caller). Messages are persisted
+(`POST /conversations/{conversation_id}/messages`), and a message can be submitted for agent execution
+(`POST /conversations/{conversation_id}/execute`), which stores the request, runs it through the runtime
+contract and Hermes adapter, and stores the assistant's reply as a second message in the same
+conversation. The conversation page renders a conversation's messages and can send a message, but does
+not yet call the execution endpoint.
 
 High-level upcoming stages:
 
-1. Authentication and persistent user data on Supabase, with ownership enforced in the API and the
-   database.
-2. Agent execution wired through the Hermes adapter boundary, with explicit run states, limits, and
-   cancellation.
-3. The chat experience over real runs, with honest progress reporting and review of results.
-4. Later — files and tools, memory, and multi-agent workflows, each only when the product requires it.
+1. Message-history retrieval and the frontend chat experience over real runs, with the execution
+   endpoint wired to the composer and honest progress reporting.
+2. Streaming agent output, with explicit run states, limits, and cancellation.
+3. Later — files and tools, memory, and multi-agent workflows, each only when the product requires it.
 
 Detailed sequencing and acceptance criteria belong to the individual tasks; this list intentionally does
 not restate the build plan.

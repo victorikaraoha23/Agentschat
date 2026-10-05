@@ -14,6 +14,8 @@ import pytest
 from app.config import Settings
 from app.messages import (
     MESSAGE_COLUMNS,
+    MESSAGE_ROLE_ASSISTANT,
+    MESSAGE_ROLE_USER,
     Message,
     MessageCreateError,
     SupabaseMessageStore,
@@ -235,3 +237,64 @@ def test_the_created_row_is_parsed_into_the_domain_model() -> None:
     assert message.role == "user"
     assert str(message.conversation_id) == CONVERSATION_ID
     assert str(message.user_id) == USER_ID
+# --- Assistant write (Task 8.2) ---------------------------------------------
+
+
+def test_the_assistant_payload_names_the_assistant_role() -> None:
+    """The reply is stored with `role = assistant` and the same owner."""
+    store, _conversations, messages, _names = make_store()
+
+    store.create_assistant_for_user(USER_ID, CONVERSATION_ID, "Reply text")
+
+    assert messages.insert_query.payload == {
+        "conversation_id": CONVERSATION_ID,
+        "user_id": USER_ID,
+        "role": "assistant",
+        "content": "Reply text",
+    }
+
+
+def test_the_assistant_write_is_scoped_by_the_same_ownership_statement() -> None:
+    """The reply passes through the identical owner-scoped read as the request.
+
+    Sharing that statement is the point: there is no second path to the table that
+    skipped the ownership check, so an assistant row cannot land in a conversation
+    the caller does not own.
+    """
+    store, conversations, messages, _names = make_store()
+
+    store.create_assistant_for_user(USER_ID, CONVERSATION_ID, "Reply text")
+
+    assert conversations.read.filters == [
+        ("id", CONVERSATION_ID),
+        ("user_id", USER_ID),
+    ]
+    assert conversations.read.used_maybe_single is True
+    assert messages.insert_query.selected == MESSAGE_COLUMNS
+
+
+def test_an_unowned_conversation_gets_no_assistant_row() -> None:
+    """A conversation the caller does not own is answered, never written."""
+    store, _conversations, messages, _names = make_store(owned=None)
+
+    assert (
+        store.create_assistant_for_user(USER_ID, CONVERSATION_ID, "Reply text") is None
+    )
+    assert messages.insert_query.payload is None
+
+
+def test_the_assistant_writer_takes_the_role_from_a_constant_not_an_argument() -> None:
+    """`system`, `tool`, and `agent` stay unreachable: there is no third method."""
+    store, _conversations, messages, _names = make_store()
+
+    store.create_assistant_for_user(USER_ID, CONVERSATION_ID, "Reply text")
+
+    writers = {
+        name
+        for name in dir(store)
+        if name.startswith("create_") and callable(getattr(store, name))
+    }
+    assert writers == {"create_for_user", "create_assistant_for_user"}
+    # The private helper takes a role, but only the two constants reach it.
+    assert MESSAGE_ROLE_ASSISTANT == "assistant"
+    assert MESSAGE_ROLE_USER == "user"
