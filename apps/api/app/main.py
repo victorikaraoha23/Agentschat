@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from httpx import HTTPError
 from pydantic import BaseModel, Field, field_validator
+from starlette.concurrency import run_in_threadpool
 from supabase import PostgrestAPIError, SupabaseException
 
 from app.auth import AuthenticatedUser, require_authenticated_user
@@ -489,8 +490,8 @@ async def execute_user_message(
     #    conversation owned by someone else writes nothing and answers the same
     #    404 as one that does not exist.
     try:
-        message = store.create_for_user(
-            user.user_id, str(conversation_id), body.content
+        message = await run_in_threadpool(
+            store.create_for_user, user.user_id, str(conversation_id), body.content
         )
     except MessageCreateError as exc:
         raise HTTPException(

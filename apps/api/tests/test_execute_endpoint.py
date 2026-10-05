@@ -10,6 +10,7 @@ running Hermes instance.
 
 from __future__ import annotations
 
+from threading import get_ident
 from typing import Protocol
 from uuid import UUID
 
@@ -354,6 +355,38 @@ def test_valid_content_survives_round_trip_intact(
 
 
 # --- Persistence ------------------------------------------------------------
+
+
+def test_persistence_runs_outside_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Synchronous persistence runs on a worker; runtime execution stays async."""
+    persistence_threads: list[int] = []
+    runtime_threads: list[int] = []
+
+    class ThreadRecordingStore(FakeMessageStore):
+        def create_for_user(
+            self, user_id: str, conversation_id: str, content: str
+        ) -> Message | None:
+            persistence_threads.append(get_ident())
+            return super().create_for_user(user_id, conversation_id, content)
+
+    class ThreadRecordingRuntime(FakeSuccessRuntime):
+        async def execute(self, request: RuntimeRequest) -> RuntimeResult:
+            runtime_threads.append(get_ident())
+            return await super().execute(request)
+
+    store, _runtime, response = execute_message(
+        monkeypatch,
+        {"content": "Hello"},
+        store=ThreadRecordingStore(),
+        runtime=ThreadRecordingRuntime(),
+    )
+
+    assert response.status_code == 200
+    assert store.writes == [(USER_ID, CONVERSATION_ID, "Hello")]
+    assert len(persistence_threads) == len(runtime_threads) == 1
+    assert persistence_threads[0] != runtime_threads[0]
 
 
 def test_message_is_persisted_before_the_runtime_runs(
